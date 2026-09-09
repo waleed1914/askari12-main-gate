@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Test litter written into the repo root by the suite
+.pytest_cache/
+.test-cache-*/
+.test-tmp-*/
+
+# Camera/OCR captures taken during development. Regenerable, and some hold real
+# CNIC scans, which must never leave this machine.
+.local-captures/
+
+# Runtime data lives in C:\AskariVMS, never in the repo. Belt and braces.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
