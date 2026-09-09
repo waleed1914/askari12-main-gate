@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 from askari_vms.audit import AuditLog, AuditSeverity, sample_audit_events
 from askari_vms.auth import Session
 from askari_vms.cnic_ocr import LocalCNICReader
+from askari_vms.ip_camera import entry_driver_feed
+from askari_vms.anpr import entry_anpr_feed
 from askari_vms.ui.brand import circular_logo
 from askari_vms.navigation import ADMIN_NAVIGATION, NavigationItem
 from askari_vms.routing import Portal, workstation_lane
@@ -295,6 +297,9 @@ class AdminWindow(QMainWindow):
                 self.settings.peripherals.id_card_camera_index,
                 self.settings.storage.data_directory,
             ),
+            driver_camera=entry_driver_feed(self.settings),
+            anpr_feed=entry_anpr_feed(self.settings),
+            image_directory=self.settings.storage.data_directory,
         )
         portal.refresh_events()
         self.entry_portal = portal

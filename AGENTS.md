@@ -27,8 +27,11 @@ repository and write through on every mutation. A fresh database seeds itself fr
 `ON CONFLICT(<pk>) DO UPDATE` rather than `INSERT OR REPLACE`, which would silently
 delete the conflicting row.
 
-**Authentication:** `auth.py` + `ui/pages/login.py`. The app opens on a sign-in screen;
-nothing else is reachable until an **active** account authenticates. `AuditLog.set_operator()`
+**Authentication:** `auth.py` + `ui/pages/login.py`. The app opens on a sign-in screen.
+Startup provisions initial accounts when the users table is empty, before showing
+login (`Store.seed_accounts_if_empty`). This also works if camera settings already
+exist. Existing accounts are never reset, and this step creates no demo traffic.
+Nothing else is reachable until an **active** account authenticates. `AuditLog.set_operator()`
 then stamps every event with the real operator and workstation, and Login/Logout are
 themselves audited with the session times. An unknown username and a wrong password give
 the identical message, so the form cannot be used to enumerate accounts; the password is
@@ -56,7 +59,13 @@ reading order on a card is not reliable. `CNICReadError` is documented as recove
 must never prevent manual entry.
 
 **Entry portal:** `ui/pages/entry_portal.py`, opened from the Admin topbar and shown
-only when the workstation role includes Entry. Keyboard-first: F1–F12 pick the category
+only when the workstation role includes Entry.
+The 2026-09-09 layout update uses a compact shortcut strip, larger form text and
+inputs, and side-by-side ID/driver previews that scale without cropping. The inactive
+ANPR panel stays compact. Form and camera cards scroll if the window is too small;
+do not reintroduce fixed preview sizes or overlapping capture panels. The event table
+shows two measured rows at once, with scrolling for the remaining readings.
+Keyboard-first: F1–F12 pick the category
 (read from the persisted `categories` table), Ctrl+D holds to dictate the destination,
 Ctrl+Enter submits, Ctrl+N starts the next visitor. Submitting writes the visit, records
 a `Visitor decision` event and a separate `Gate command` event — the gate opens on print,
@@ -97,7 +106,43 @@ These four names are exact and confirmed. Known unit: `192.168.0.90` (the second
 not yet configured). Board also exposes fire alarm, Exit1/2 buttons, Sensor1/2,
 tamper and reset inputs, an RS-485 long-range reader, and MQTT.
 
-### Cameras — Dahua, visitor lanes only
+### Cameras — visitor lanes only
+
+**Entry ANPR update, 2026-09-09:** the user assigned `192.168.1.13` to Visitor Entry.
+Device identity ITC413-PW4D-Z3 and authenticated event subscription were verified on
+the LAN. `anpr.py` subscribes to Dahua `snapManager.cgi` TrafficJunction events, parses
+length-delimited multipart records, and delivers recognized plates to
+`EntryPortalWindow.read_plate()`. New plates fill Vehicle Number without taking focus,
+submitting a visit or operating a gate. Repeated reads do not undo manual corrections;
+old queued detections are discarded on Next visitor. Network failures reconnect with
+backoff and leave manual entry available. Credentials remain in Windows Credential
+Manager, scoped by the configured camera key and address.
+
+Camera keys are durable identifiers, not lane assignments: `.13` retains its legacy
+`anpr_exit` key but is assigned to Entry. `.12` is now Unassigned until its physical
+lane is confirmed; do not assume it is Exit. The factory selects by role and lane.
+The ANPR panel currently reports detection status; plate detection does not claim to
+capture an overview or cropped-plate image. Integration was checked against the
+[Dahua real-time subscription specification](https://files.dahua.support/Solutions/Access%20Control%20Solution/Integration/DAHUA%20ACCESS%20CONTROL%20PRODUCTS%20INTEGRATION%20INSTRUCTION%20Ver1.0.pdf).
+
+**Entry driver update, 2026-09-09:** the device at `192.168.1.16` was queried directly
+and identifies as **Hikvision DS-2CD1653G0-IZS**, firmware **V5.7.20**. It replaces the
+earlier Dahua Entry driver assignment below. `ip_camera.py` reads authenticated JPEGs
+from `/ISAPI/Streaming/channels/101/picture` over HTTP port 80, approximately twice per
+second. This is a refreshing snapshot preview, not full-motion RTSP video. Network
+I/O runs outside Qt, retries automatically, and never blocks submission. Credentials
+are in Windows Credential Manager, scoped by camera key and address; never add them
+to settings, source, logs or this file. Credentials must be provisioned separately on
+another Windows account or PC.
+
+Both Entry launch paths now show this preview. Capture (or Submit if not already
+captured) saves a fresh driver image under `data/images/driver_entry/YYYY-MM-DD`.
+Schema version 4 adds `VisitRecord.driver_image`; old records remain valid with an
+empty path. Exit and VMS detail show the saved entry driver photograph. Clearing the
+form prevents the preceding visitor's cached frame from being reused. Missing or
+stale frames and image write failures flag missing evidence and still allow submit.
+Entry ANPR detection is also integrated as described above. Other IP camera feeds,
+printing and gate commands remain simulated.
 
 Recovered from the ConfigTool scan. E-tag lanes have **no cameras**; the controller
 already knows who the holder is, so only event data is needed there.
@@ -430,8 +475,10 @@ Audit events now carry the signed-in operator and workstation. The `system` /
   power-on self-test: hold FEED while switching on.
 - Confirm `/GEvent.xml` reports rejected and unknown tags, on real hardware.
 - Second controller's IP is unassigned.
-- Camera lane assignment defaults to ANPR .12 / driver .14 on Visitor Entry and
-  .13 / .15 on Visitor Exit. Confirm against the physical wiring.
+- Entry driver camera confirmed by the user on 2026-09-09: `http://192.168.1.16/`.
+  This supersedes the earlier ConfigTool scan address `.14` for Visitor Entry.
+- Camera lane assignment: ANPR .13 / driver .16 on Visitor Entry, driver .15 on
+  Visitor Exit. ANPR .12 is Unassigned pending physical lane confirmation.
 - Settings is UI + validation only: nothing is persisted and "Test connection" is
   simulated. Reachability testing is the controller adapter's first job.
 - Controller passwords are held in memory for the session only. They belong in the

@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QImage, QKeySequence, QPixmap, QShortcut
@@ -22,7 +23,7 @@ from PySide6.QtMultimedia import (
 )
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from askari_vms.audit import AuditLog, AuditSeverity
@@ -32,6 +33,8 @@ from askari_vms.ui.brand import circular_logo
 from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
 from askari_vms.etag_events import ETagEvent
+from askari_vms.ip_camera import SnapshotFeed
+from askari_vms.anpr import ANPRFeed, normalize_plate
 from askari_vms.ui.event_styles import ROW_COLOURS, TEXT_COLOURS
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
 from askari_vms.visits import (
@@ -107,14 +110,44 @@ class _CNICCaptureWorker(QObject):
             self.finished.emit()
 
 
+class CameraPreview(QLabel):
+    """Keep the original image and fit it to the available space without cropping."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._source = QPixmap()
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.setMinimumSize(80, 90)
+
+    def setPixmap(self, pixmap: QPixmap) -> None:
+        self._source = pixmap
+        self._fit()
+
+    def _fit(self) -> None:
+        if not self._source.isNull():
+            super().setPixmap(self._source.scaled(
+                self.contentsRect().size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit()
+
+    def clear(self) -> None:
+        self._source = QPixmap()
+        super().clear()
+
+
 class StreamPanel(QFrame):
     """A live camera view. The feed arrives when the camera adapter is enabled."""
 
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, compact: bool = False) -> None:
         super().__init__()
         self.setObjectName("capturePanel")
-        self.setMinimumHeight(150)
-        layout = QVBoxLayout(self)
+        self.setMinimumHeight(0 if compact else 150)
+        layout = QHBoxLayout(self) if compact else QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(4)
         name = QLabel(title)
@@ -124,22 +157,11 @@ class StreamPanel(QFrame):
         self.state.setProperty("muted", "true")
         self.state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state.setWordWrap(True)
-        self.preview = QLabel()
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumHeight(90)
+        self.preview = CameraPreview()
         self.preview.hide()
         layout.addWidget(name)
-        layout.addStretch()
-        # A fixed-size preview would sit hard against the left edge: a QVBoxLayout
-        # left-aligns any item it cannot stretch. Centre it in its own row instead.
-        preview_row = QHBoxLayout()
-        preview_row.setContentsMargins(0, 0, 0, 0)
-        preview_row.addStretch()
-        preview_row.addWidget(self.preview)
-        preview_row.addStretch()
-        layout.addLayout(preview_row, 1)
+        layout.addWidget(self.preview, 1)
         layout.addWidget(self.state)
-        layout.addStretch()
 
     def set_state(self, text: str, live: bool = False) -> None:
         self.state.setText(text)
@@ -152,10 +174,7 @@ class StreamPanel(QFrame):
         if pixmap.isNull():
             self.preview.hide()
             return
-        self.preview.setPixmap(pixmap.scaled(
-            self.preview.width(), self.preview.height(), Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        ))
+        self.preview.setPixmap(pixmap)
         self.preview.show()
 
     def clear_image(self) -> None:
@@ -179,6 +198,9 @@ class EntryPortalWindow(QWidget):
         events: Sequence[ETagEvent] | None = None,
         gate: str = "C1 - Entry",
         cnic_reader: CNICReader | None = None,
+        driver_camera: SnapshotFeed | None = None,
+        image_directory: str = "",
+        anpr_feed: ANPRFeed | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -189,6 +211,18 @@ class EntryPortalWindow(QWidget):
         self._events = list(events or [])
         self._gate = gate
         self._cnic_reader = cnic_reader
+        self._driver_camera = driver_camera
+        self._anpr_feed = anpr_feed
+        self._anpr_timer: QTimer | None = None
+        self._anpr_connected: bool | None = None
+        self._anpr_after = time.monotonic()
+        self._last_anpr_plate = ""
+        self._image_directory = image_directory
+        self._driver_image = ""
+        self._driver_after = time.monotonic()
+        self._driver_displayed_at = 0.0
+        self._driver_available: bool | None = None
+        self._driver_timer: QTimer | None = None
         self._selected: VehicleCategory | None = None
         self._captured: dict[str, bool] = {"cnic": False, "anpr": False, "driver": False, "plate": False}
         self._cnic_image = ""
@@ -208,25 +242,132 @@ class EntryPortalWindow(QWidget):
 
         self.setWindowTitle("Askari VMS — Entry Portal")
         self.setObjectName("appRoot")
+        self.setStyleSheet("""
+            QLabel { font-size: 15px; }
+            QLineEdit, QComboBox { font-size: 17px; }
+            QPushButton { font-size: 15px; min-height: 36px; }
+            QLabel#pageTitle { font-size: 25px; }
+            QLabel#captureTitle { font-size: 17px; font-weight: 600; }
+            QLabel#entryShortcuts { font-size: 14px; color: #315b43; }
+            QScrollArea { border: none; background: transparent; }
+        """)
         self.setMinimumSize(1180, 760)
         self._build()
         self._start_id_camera()
         self._install_shortcuts()
         self.clear_form()
+        if self._driver_camera is not None:
+            self._driver_camera.start()
+            self._driver_timer = QTimer(self)
+            self._driver_timer.timeout.connect(self._refresh_driver)
+            self._driver_timer.start(250)
+        if self._anpr_feed is not None:
+            self._anpr_feed.start()
+            self._anpr_timer = QTimer(self)
+            self._anpr_timer.timeout.connect(self._refresh_anpr)
+            self._anpr_timer.start(200)
+
+    def read_plate(self, plate: str) -> bool:
+        """Adapter entry point: fill only the plate; leave confirmation to the operator."""
+        plate = normalize_plate(plate)
+        if not plate or plate == self._last_anpr_plate:
+            return False
+        self._last_anpr_plate = plate
+        self.fields["vehicle_number"].setText(plate)
+        self.status.setText(f"ANPR read {plate}. Check the plate before submitting.")
+        self._audit.record(
+            action="Hardware event", target="Visitor Entry ANPR",
+            summary=f"ANPR detected {plate}",
+            details="Vehicle Number filled from the camera. Operator confirmation is still required; no visit submitted or gate command sent.",
+        )
+        return True
+
+    def _refresh_anpr(self) -> None:
+        readings, (connected, message) = self._anpr_feed.drain()
+        self._streams["anpr"].set_state(message)
+        if connected != self._anpr_connected:
+            self._audit.record(
+                action="Hardware event", target="Visitor Entry ANPR",
+                summary="ANPR connected" if connected else "ANPR unavailable",
+                details="Plate detection feed. Manual entry remains available.",
+                severity=AuditSeverity.INFO if connected else AuditSeverity.WARNING,
+            )
+            self._anpr_connected = connected
+        for reading in readings:
+            if reading.received_at > self._anpr_after and time.monotonic() - reading.received_at <= 10:
+                self.read_plate(reading.plate)
+
+    def _refresh_driver(self) -> None:
+        frame = self._driver_camera.latest()
+        panel = self._streams["driver"]
+        available = frame.fresh()
+        if available and frame.received_at != self._driver_displayed_at:
+            pixmap = QPixmap()
+            available = pixmap.loadFromData(frame.jpeg, "JPG")
+            if available:
+                panel.preview.setPixmap(pixmap)
+                panel.preview.show()
+                self._driver_displayed_at = frame.received_at
+        if not available:
+            panel.clear_image()
+        panel.set_state(frame.message if available or not frame.jpeg else "Driver camera stalled — reconnecting.")
+        if available != self._driver_available:
+            # Do not audit the normal initial connecting state as an outage.
+            if available or self._driver_available is not None:
+                self._audit.record(
+                    action="Hardware event", target="Visitor Entry driver camera",
+                    summary="Driver camera connected" if available else "Driver camera unavailable",
+                    details="Automatic snapshot feed. Manual visitor entry remains available.",
+                    severity=AuditSeverity.INFO if available else AuditSeverity.WARNING,
+                )
+            self._driver_available = available
+
+    def _capture_driver(self) -> None:
+        if self._driver_camera is None or self._driver_image:
+            return
+        frame = self._driver_camera.latest()
+        if not frame.fresh(self._driver_after):
+            self._captured["driver"] = False
+            self._streams["driver"].set_state("No fresh driver photo. You may still submit.")
+            return
+        image = QImage.fromData(frame.jpeg, "JPG")
+        try:
+            if image.isNull() or not self._image_directory:
+                raise OSError("No image or data directory")
+            folder = Path(self._image_directory) / "images" / "driver_entry" / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{uuid4().hex}.jpg"
+            if not image.save(str(path), "JPG", 95):
+                raise OSError("Image write failed")
+        except OSError:
+            self._captured["driver"] = False
+            self._streams["driver"].set_state("Driver photo could not be saved. You may still submit.")
+            return
+        self._driver_image = str(path)
+        self._captured["driver"] = True
+        self._streams["driver"].set_state("Driver photo saved for this visitor", live=True)
 
     # ---------- construction ----------
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(20, 10, 20, 10)
+        root.setSpacing(10)
         root.addWidget(self._header())
+        root.addWidget(self._shortcut_card())
 
         columns = QHBoxLayout()
         columns.setSpacing(12)
-        columns.addWidget(self._shortcut_card(), 0)
-        columns.addWidget(self._form_card(), 3)
-        columns.addWidget(self._capture_card(), 3)
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setWidgetResizable(True)
+        self.form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.form_scroll.setWidget(self._form_card())
+        columns.addWidget(self.form_scroll, 2)
+        self.capture_scroll = QScrollArea()
+        self.capture_scroll.setWidgetResizable(True)
+        self.capture_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.capture_scroll.setWidget(self._capture_card())
+        columns.addWidget(self.capture_scroll, 3)
         # Spare height goes to the form and the camera views. The events table sizes
         # itself to its rows, so giving it the stretch only padded it with blank space
         # while the form sat 1px from clipping its last field.
@@ -268,9 +409,11 @@ class EntryPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
-        mode = "ID OCR READY — OTHER HARDWARE SIMULATED" if self._cnic_reader else "HARDWARE DISABLED — SIMULATION MODE"
+        mode = "ANPR auto-fill enabled · Gate simulated" if self._anpr_feed else (
+            "Driver preview enabled · Gate simulated" if self._driver_camera else "Gate and IP cameras simulated")
         self.simulation = QLabel(mode)
         self.simulation.setProperty("status", "warning")
+        self.simulation.setWordWrap(True)
         row.addWidget(self.simulation)
 
         self.refresh_button = QPushButton("Refresh Cameras")
@@ -286,27 +429,22 @@ class EntryPortalWindow(QWidget):
     def _shortcut_card(self) -> QFrame:
         card = QFrame()
         card.setProperty("card", True)
-        card.setMaximumWidth(210)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
-        heading = QLabel("Shortcut Keys")
-        heading.setObjectName("shortcutHeading")
-        layout.addWidget(heading)
-
-        lines = [f"<b>{c.shortcut}</b>: {c.name}" for c in self._categories]
-        lines += [
-            "",
-            f"<b>{DICTATE_KEY}</b>: Destination",
-            f"<b>{CAPTURE_KEY}</b>: Capture CNIC",
-            f"<b>{SUBMIT_KEY}</b>: Submit",
-            f"<b>{CLEAR_KEY}</b>: New record",
-        ]
-        keys = QLabel("<br>".join(lines) or "No categories configured")
-        keys.setObjectName("shortcutPanel")
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(4)
+        lines = [f"<b>{c.shortcut}</b> {c.name}" for c in self._categories]
+        if lines:
+            categories = QLabel(" &nbsp; · &nbsp; ".join(lines))
+            categories.setObjectName("entryShortcuts")
+            categories.setWordWrap(True)
+            layout.addWidget(categories)
+        keys = QLabel(" &nbsp; · &nbsp; ".join((
+            "<b>Ctrl+D</b> Destination", "<b>Ctrl+K</b> Capture",
+            "<b>Ctrl+Enter</b> Submit", "<b>Ctrl+N</b> Next visitor",
+        )))
+        keys.setObjectName("entryShortcuts")
         keys.setWordWrap(True)
         layout.addWidget(keys)
-        layout.addStretch()
         return card
 
     def _form_card(self) -> QFrame:
@@ -314,7 +452,7 @@ class EntryPortalWindow(QWidget):
         card.setProperty("card", True)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(18, 14, 18, 16)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
         self.fields: dict[str, QLineEdit] = {}
         placeholders = {
@@ -326,14 +464,15 @@ class EntryPortalWindow(QWidget):
             caption = QLabel(label)
             editor = QLineEdit()
             editor.setPlaceholderText(placeholders.get(key, ""))
-            editor.setMinimumHeight(34)
+            editor.setMinimumHeight(40)
             self.fields[key] = editor
             layout.addWidget(caption)
             layout.addWidget(editor)
+            layout.addSpacing(5)
 
         layout.addWidget(QLabel("Vehicle Type"))
         self.vehicle_type = QComboBox()
-        self.vehicle_type.setMinimumHeight(34)
+        self.vehicle_type.setMinimumHeight(40)
         self.vehicle_type.addItems([c.name for c in self._categories] or ["No categories configured"])
         self.vehicle_type.currentTextChanged.connect(self._vehicle_type_changed)
         layout.addWidget(self.vehicle_type)
@@ -363,28 +502,35 @@ class EntryPortalWindow(QWidget):
         layout.setSpacing(10)
 
         top = QHBoxLayout()
-        heading = QLabel("CNIC")
+        heading = QLabel("Visitor cameras")
         heading.setProperty("section", "true")
         top.addWidget(heading)
         top.addStretch()
         self.capture_button = QPushButton("Capture")
         self.capture_button.setObjectName("primaryButton")
+        self.capture_button.setStyleSheet("min-height: 28px; padding: 6px 16px;")
         self.capture_button.clicked.connect(self.capture)
         top.addWidget(self.capture_button)
         layout.addLayout(top)
 
         self.cnic_panel = StreamPanel("ID card")
-        self.cnic_panel.setMinimumHeight(360)
-        self.cnic_panel.preview.setFixedSize(300, 300)
-        layout.addWidget(self.cnic_panel)
-
+        views = QGridLayout()
+        views.setSpacing(12)
+        views.addWidget(self.cnic_panel, 0, 0)
         self._streams: dict[str, StreamPanel] = {}
         for key, title in STREAMS:
-            panel = StreamPanel(title)
+            panel = StreamPanel(title, compact=key == "anpr")
             self._streams[key] = panel
-            layout.addWidget(panel)
+        views.addWidget(self._streams["driver"], 0, 1)
+        views.addWidget(self._streams["anpr"], 1, 0, 1, 2)
+        views.setColumnStretch(0, 1)
+        views.setColumnStretch(1, 1)
+        views.setRowStretch(0, 4)
+        views.setRowStretch(1, 0)
+        layout.addLayout(views, 1)
 
         self.choose_button = QPushButton("Choose ID card image…")
+        self.choose_button.setStyleSheet("min-height: 28px; padding: 6px 16px;")
         self.choose_button.clicked.connect(self.choose_cnic_image)
         layout.addWidget(self.choose_button)
         return card
@@ -482,8 +628,18 @@ class EntryPortalWindow(QWidget):
         else:
             self.start_cnic_capture()
         for key in ("anpr", "driver", "plate"):
+            if key in ("anpr", "plate") and self._anpr_feed is not None:
+                continue  # Plate events are not captured overview/crop photographs.
+            if key == "driver" and self._driver_camera is not None:
+                self._driver_image = ""
+                self._capture_driver()
+                continue
             self._captured[key] = True
         for key, title in STREAMS:
+            if key == "anpr" and self._anpr_feed is not None:
+                continue
+            if key == "driver" and self._driver_camera is not None:
+                continue
             self._streams[key].set_state("Captured (simulated)", live=True)
         if self._cnic_reader is None:
             self.status.setText("Captured ID card, ANPR overview, plate crop and driver image (simulated).")
@@ -667,11 +823,7 @@ class EntryPortalWindow(QWidget):
         self._preview_frame_count += 1
         if self._preview_frame_count % 3:
             return
-        pixmap = QPixmap.fromImage(image).scaled(
-            self.cnic_panel.preview.width(), self.cnic_panel.preview.height(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        pixmap = QPixmap.fromImage(image)
         self.cnic_panel.preview.setPixmap(pixmap)
         self.cnic_panel.preview.show()
         self.cnic_panel.set_state(LIVE_PROMPT, live=True)
@@ -722,6 +874,15 @@ class EntryPortalWindow(QWidget):
         self.cnic_panel.set_state(Path(path).name, live=True)
 
     def refresh_cameras(self) -> None:
+        if self._anpr_feed is not None:
+            self._refresh_anpr()
+        if self._driver_camera is not None:
+            self._refresh_driver()
+            self.status.setText("Driver preview refreshed. Unavailable cameras reconnect automatically.")
+            return
+        if self._anpr_feed is not None:
+            self.status.setText("ANPR status refreshed. Disconnections reconnect automatically.")
+            return
         for panel in (self.cnic_panel, *self._streams.values()):
             if not panel.property("captured") == "true":
                 panel.set_state("No feed — camera adapter not enabled")
@@ -808,12 +969,15 @@ class EntryPortalWindow(QWidget):
                 if foreground is not None:
                     item.setForeground(QBrush(foreground))
                 self.events_table.setItem(row, column, item)
-        fit_height_to_rows(self.events_table)
+        fit_height_to_rows(self.events_table, maximum_rows=2)
+        self.events_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._event_columns.apply()
 
     # ---------- submit ----------
 
     def clear_form(self) -> None:
+        self._anpr_after = time.monotonic()
+        self._last_anpr_plate = ""
         for editor in self.fields.values():
             editor.clear()
             editor.setProperty("ocrConfidence", "")
@@ -822,6 +986,8 @@ class EntryPortalWindow(QWidget):
         self._selected = None
         self._dictating = False
         self._cnic_image = ""
+        self._driver_image = ""
+        self._driver_after = time.monotonic()
         self._captured = {key: False for key in self._captured}
         self.cnic_panel.set_state("No feed")
         self.cnic_panel.clear_image()
@@ -844,6 +1010,14 @@ class EntryPortalWindow(QWidget):
         self.fields["destination"].setFocus()
 
     def closeEvent(self, event) -> None:
+        if self._anpr_timer is not None:
+            self._anpr_timer.stop()
+        if self._anpr_feed is not None:
+            self._anpr_feed.stop()
+        if self._driver_timer is not None:
+            self._driver_timer.stop()
+        if self._driver_camera is not None:
+            self._driver_camera.stop()
         # Stop the watchdog first, or it reopens the camera we are shutting down.
         if self._camera_timer is not None:
             self._camera_timer.stop()
@@ -868,10 +1042,12 @@ class EntryPortalWindow(QWidget):
             cnic_issue_date=self.fields["cnic_issue_date"].text().strip(),
             cnic_expiry_date=self.fields["cnic_expiry_date"].text().strip(),
             cnic_image=self._cnic_image,
+            driver_image=self._driver_image,
         ).normalized()
 
     def submit(self) -> VisitRecord:
         """Record the visit, print the receipt, open the gate. Never refuses."""
+        self._capture_driver()
         visit = self.build_visit()
         self._visits.insert(0, visit)
 

@@ -15,7 +15,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -375,6 +375,14 @@ class ExitPortalWindow(QWidget):
             self.results.hide()
 
     def select(self, visit: VisitRecord) -> None:
+        self.evidence.clear()
+        photo = QPixmap(visit.driver_image) if visit.driver_image else QPixmap()
+        if not photo.isNull():
+            self.evidence.setPixmap(photo.scaled(360, 180, Qt.AspectRatioMode.KeepAspectRatio,
+                                                Qt.TransformationMode.SmoothTransformation))
+            self.evidence.setToolTip("Driver photographed at entry")
+        else:
+            self.evidence.setText("Entry driver photo unavailable. Compare manually and record your decision.")
         self._visit = visit
         self._decision = ""
         self.visit_heading.setText(
@@ -449,6 +457,9 @@ class ExitPortalWindow(QWidget):
         self.status.setText("Captured exit driver, ANPR overview and plate crop (simulated).")
 
     def clear(self) -> None:
+        self.evidence.clear()
+        self.evidence.setText("Find a visit to view its entry driver photograph.")
+        self.evidence.setToolTip("")
         self._visit = None
         self._decision = ""
         self._matches = []

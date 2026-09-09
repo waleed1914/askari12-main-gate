@@ -29,11 +29,12 @@ def test_defaults_match_the_surveyed_hardware() -> None:
 
     assert len(settings.cameras) == 4
     assert {camera.role for camera in settings.cameras} == {ANPR, "Driver"}
-    assert all(camera.port == 37777 for camera in settings.cameras)
+    assert next(camera for camera in settings.cameras if camera.key == "driver_entry").snapshot_path == "/ISAPI/Streaming/channels/101/picture"
+    assert all(camera.port == 37777 for camera in settings.cameras if camera.key != "driver_entry")
     # Every visitor lane is covered; e-tag lanes are deliberately absent.
-    assert {camera.lane for camera in settings.cameras} == {VISITOR_ENTRY, VISITOR_EXIT}
+    assert {camera.lane for camera in settings.cameras} == {VISITOR_ENTRY, VISITOR_EXIT, UNASSIGNED}
     assert not validate_settings(settings)
-    assert unassigned_lanes(settings) == ()
+    assert unassigned_lanes(settings) == ("Visitor Exit has no ANPR camera",)
 
 
 def test_ip_and_port_validation() -> None:
@@ -65,18 +66,18 @@ def test_two_devices_cannot_share_an_address() -> None:
 
 def test_a_lane_cannot_hold_two_cameras_of_the_same_role() -> None:
     settings = default_settings()
-    doubled = with_camera(settings, replace(settings.cameras[1], lane=VISITOR_ENTRY))
+    doubled = with_camera(settings, replace(settings.cameras[0], lane=VISITOR_ENTRY))
     errors = validate_settings(doubled)
     assert any("more than one ANPR" in message for message in errors.values())
 
 
 def test_assigned_camera_requires_an_address() -> None:
     settings = default_settings()
-    blank = with_camera(settings, replace(settings.cameras[0], ip_address=""))
+    blank = with_camera(settings, replace(settings.cameras[1], ip_address=""))
     assert any("IP address is required" in message for message in validate_settings(blank).values())
 
     # Unassigning it makes the blank address acceptable again.
-    parked = with_camera(blank, replace(blank.cameras[0], lane=UNASSIGNED))
+    parked = with_camera(blank, replace(blank.cameras[1], lane=UNASSIGNED))
     assert not any("IP address is required" in message for message in validate_settings(parked).values())
     assert "Visitor Entry has no ANPR camera" in unassigned_lanes(parked)
 

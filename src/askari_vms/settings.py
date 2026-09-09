@@ -57,6 +57,9 @@ class CameraSettings:
     ip_address: str = ""
     port: int = 37777
     lane: str = UNASSIGNED
+    http_port: int = 80
+    snapshot_path: str = ""
+    anpr_event_path: str = ""
 
     @property
     def assigned(self) -> bool:
@@ -98,9 +101,11 @@ def default_settings() -> AppSettings:
             ControllerSettings("exit", "Exit Controller"),
         ),
         cameras=(
-            CameraSettings("anpr_entry", ANPR, "ITC413-PW4D-Z3", "192.168.1.12", 37777, VISITOR_ENTRY),
-            CameraSettings("anpr_exit", ANPR, "ITC413-PW4D-Z3", "192.168.1.13", 37777, VISITOR_EXIT),
-            CameraSettings("driver_entry", DRIVER, "DH-IPC-HFW2441", "192.168.1.14", 37777, VISITOR_ENTRY),
+            CameraSettings("anpr_entry", ANPR, "ITC413-PW4D-Z3", "192.168.1.12", 37777, UNASSIGNED),
+            CameraSettings("anpr_exit", ANPR, "ITC413-PW4D-Z3", "192.168.1.13", 37777, VISITOR_ENTRY,
+                           anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5"),
+            CameraSettings("driver_entry", DRIVER, "DS-2CD1653G0-IZS", "192.168.1.16", 8000, VISITOR_ENTRY,
+                           snapshot_path="/ISAPI/Streaming/channels/101/picture"),
             CameraSettings("driver_exit", DRIVER, "DH-IPC-HFW2441", "192.168.1.15", 37777, VISITOR_EXIT),
         ),
     )
@@ -122,6 +127,12 @@ def validate_settings(settings: AppSettings) -> dict[str, str]:
             errors[f"controller_{controller.key}_user"] = f"{controller.name}: a username is required."
 
     for camera in settings.cameras:
+        if camera.anpr_event_path and (not camera.anpr_event_path.startswith("/") or camera.anpr_event_path.startswith("//")):
+            errors[f"camera_{camera.key}_anpr_event_path"] = "ANPR event path must be an absolute path on the device."
+        if not is_valid_port(camera.http_port):
+            errors[f"camera_{camera.key}_http_port"] = "Camera HTTP port must be between 1 and 65535."
+        if camera.snapshot_path and (not camera.snapshot_path.startswith("/") or camera.snapshot_path.startswith("//")):
+            errors[f"camera_{camera.key}_snapshot_path"] = "Camera snapshot path must be an absolute path on the device."
         if not camera.ip_address:
             if camera.assigned:
                 errors[f"camera_{camera.key}_ip"] = f"{camera.model} ({camera.lane}): an IP address is required."

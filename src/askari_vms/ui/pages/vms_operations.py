@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -161,6 +161,15 @@ class VisitDetailPage(QScrollArea):
 
     def _evidence_card(self) -> QFrame:
         card, grid = self._card("Captured evidence")
+        if self.visit.driver_image:
+            photo = QPixmap(self.visit.driver_image)
+            if not photo.isNull():
+                preview = QLabel()
+                preview.setPixmap(photo.scaled(480, 240, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation))
+                grid.addWidget(QLabel("Entry driver photograph"), 1, 0, 1, 4)
+                grid.addWidget(preview, 2, 0, 1, 4)
+                return card
         note = QLabel(
             "Driver photo, ANPR overview, cropped plate and ID card image are captured for "
             "every entry and exit. Images appear here once the camera adapters are enabled."

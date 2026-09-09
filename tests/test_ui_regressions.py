@@ -192,7 +192,7 @@ def test_settings_blocks_two_cameras_on_one_lane(qapp) -> None:
     from askari_vms.ui.pages.settings import SettingsPage
 
     page = SettingsPage(AuditLog())
-    page._camera_fields["anpr_exit"]["lane"].setCurrentText(VISITOR_ENTRY)
+    page._camera_fields["anpr_entry"]["lane"].setCurrentText(VISITOR_ENTRY)
     assert page.save() is False
     assert "more than one ANPR" in page.message.text()
 

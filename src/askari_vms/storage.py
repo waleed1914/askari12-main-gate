@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -125,6 +125,7 @@ class Database:
             ("cnic_issue_date", "TEXT NOT NULL DEFAULT \'\'"),
             ("cnic_expiry_date", "TEXT NOT NULL DEFAULT \'\'"),
             ("cnic_image", "TEXT NOT NULL DEFAULT \'\'"),
+            ("driver_image", "TEXT NOT NULL DEFAULT \'\'"),
         ),
     }
 
@@ -291,7 +292,7 @@ class VisitRepository(_Repository):
         "visit_id", "barcode", "entry_time", "entry_operator", "entry_door", "visitor_name",
         "cnic", "mobile", "vehicle_number", "vehicle_category", "destination", "exit_time",
         "exit_operator", "exit_door", "driver_match", "receipt_lost",
-        "father_name", "date_of_birth", "cnic_issue_date", "cnic_expiry_date", "cnic_image",
+        "father_name", "date_of_birth", "cnic_issue_date", "cnic_expiry_date", "cnic_image", "driver_image",
     )
 
     @staticmethod
@@ -473,6 +474,31 @@ class Store:
 
     def close(self) -> None:
         self.database.close()
+
+    def seed_accounts_if_empty(self) -> bool:
+        """Provision initial logins before displaying the sign-in screen.
+
+        Never reset existing accounts or add demonstration gate traffic. Settings
+        and audit rows may already exist from hardware setup before the first login.
+        """
+        if self.users.count():
+            return False
+        from askari_vms.audit import AuditLog
+        from askari_vms.demo_data import user_accounts
+
+        accounts = user_accounts()
+        columns = self.users._COLUMNS
+        self.users._write_many(
+            self.users._upsert_sql("users", columns, "employee_id"),
+            [tuple(asdict(account)[column] for column in columns) for account in accounts],
+        )
+        AuditLog(self.audit.list(), repository=self.audit).record(
+            action="Record created", target="Initial user accounts",
+            summary="Initial sign-in accounts provisioned",
+            details="The user table was empty. Initial accounts were created; change their initial passwords through Users before live use.",
+            severity=AuditSeverity.WARNING, operator="SYSTEM",
+        )
+        return True
 
     def seed_demo_data(self) -> None:
         """Fill an empty database so a fresh install is explorable."""

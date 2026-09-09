@@ -424,6 +424,46 @@ def test_spare_height_goes_to_the_form_not_the_event_table(qapp) -> None:
     assert tall > short, "the form card should take the extra height"
 
 
+def test_camera_panels_never_overlap_and_preview_grows(qapp):
+    from PySide6.QtGui import QPixmap
+    from askari_vms.ui.pages.entry_portal import EntryPortalWindow
+    from askari_vms.ui.theme import APP_STYLESHEET
+    from askari_vms.demo_data import etag_records, etag_event_records
+
+    page = EntryPortalWindow(categories=default_categories(), events=etag_event_records(etag_records()))
+    # Exercise the real theme as padding affects minimum layout sizes.
+    page.setStyleSheet(APP_STYLESHEET + page.styleSheet())
+    photo = QPixmap(1280, 720)
+    photo.fill()
+    for panel in (page.cnic_panel, page._streams["driver"]):
+        panel.preview.setPixmap(photo)
+        panel.preview.show()
+    page.show()
+    try:
+        heights = []
+        for width, height in ((1180, 760), (1600, 1000)):
+            page.resize(width, height)
+            qapp.processEvents()
+            panels = [page.cnic_panel, *page._streams.values()]
+            for index, panel in enumerate(panels):
+                assert panel.parentWidget().rect().contains(panel.geometry())
+                for other in panels[index + 1:]:
+                    assert not panel.geometry().intersects(other.geometry())
+            preview = page._streams["driver"].preview
+            assert preview.pixmap().width() <= preview.width()
+            assert preview.pixmap().height() <= preview.height()
+            heights.append(preview.pixmap().height())
+        assert heights[1] > heights[0]
+        assert heights[1] > 200
+        page.form_scroll.ensureWidgetVisible(page.vehicle_type)
+        qapp.processEvents()
+        viewport = page.form_scroll.viewport()
+        assert viewport.rect().contains(page.vehicle_type.mapTo(viewport, page.vehicle_type.rect().center()))
+        assert page.events_table.rowCount() == 8  # additional events remain scrollable
+    finally:
+        page.close()
+
+
 def test_the_emblem_appears_on_the_entry_header(qapp) -> None:
     from PySide6.QtWidgets import QLabel
     from askari_vms.categories import default_categories

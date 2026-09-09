@@ -48,6 +48,7 @@ class VisitRecord:
     cnic_issue_date: str = ""
     cnic_expiry_date: str = ""
     cnic_image: str = ""
+    driver_image: str = ""
     exit_time: datetime | None = None
     exit_operator: str = ""
     exit_door: str = ""

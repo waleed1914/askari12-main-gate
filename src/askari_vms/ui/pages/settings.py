@@ -59,8 +59,9 @@ class SettingsPage(QScrollArea):
         layout.addLayout(header)
 
         self.banner = QLabel(
-            "Hardware adapters are not enabled yet. Values saved here configure the "
-            "system; no device is contacted until the controller adapter is switched on."
+            "Entry driver preview and ANPR plate detection connect using their configured endpoints "
+            "and Windows credentials. Controller commands remain simulated. "
+            "Restart the portal after saving camera changes."
         )
         self.banner.setObjectName("infoBanner")
         self.banner.setWordWrap(True)
@@ -193,14 +194,20 @@ class SettingsPage(QScrollArea):
                 "ip_address": self._line("192.168.1.12"),
                 "port": self._port(),
                 "lane": QComboBox(),
+                "http_port": self._port(),
+                "snapshot_path": self._line("Snapshot path (blank disables preview)"),
+                "anpr_event_path": self._line("ANPR event path (blank disables detection)"),
             }
             fields["lane"].addItems(CAMERA_LANES)
             fields["lane"].setMinimumHeight(36)
             self._field(grid, row + 1, 0, "IP Address", fields["ip_address"])
-            self._field(grid, row + 1, 1, "Port", fields["port"])
+            self._field(grid, row + 1, 1, "SDK port", fields["port"])
             self._field(grid, row + 1, 2, "Assigned lane", fields["lane"])
+            self._field(grid, row + 2, 0, "HTTP port", fields["http_port"])
+            self._field(grid, row + 2, 1, "Snapshot path", fields["snapshot_path"])
+            self._field(grid, row + 2, 2, "ANPR event path", fields["anpr_event_path"])
             self._camera_fields[camera.key] = fields
-            row += 2
+            row += 3
         return card
 
     def _peripherals_card(self) -> QFrame:
@@ -263,6 +270,9 @@ class SettingsPage(QScrollArea):
             fields["ip_address"].setText(camera.ip_address)
             fields["port"].setValue(camera.port)
             fields["lane"].setCurrentText(camera.lane)
+            fields["http_port"].setValue(camera.http_port)
+            fields["snapshot_path"].setText(camera.snapshot_path)
+            fields["anpr_event_path"].setText(camera.anpr_event_path)
         self.id_camera_index.setValue(self.settings.peripherals.id_card_camera_index)
         self.printer.setText(self.settings.peripherals.receipt_printer)
         self.data_directory.setText(self.settings.storage.data_directory)
@@ -290,6 +300,9 @@ class SettingsPage(QScrollArea):
                 ip_address=fields["ip_address"].text().strip(),
                 port=fields["port"].value(),
                 lane=fields["lane"].currentText(),
+                http_port=fields["http_port"].value(),
+                snapshot_path=fields["snapshot_path"].text().strip(),
+                anpr_event_path=fields["anpr_event_path"].text().strip(),
             ))
         return replace(
             self.settings,

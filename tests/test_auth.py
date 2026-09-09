@@ -81,3 +81,40 @@ def test_a_session_describes_who_is_working_where() -> None:
     assert session.workstation == "Admin + Entry"
     assert session.signed_in_at == when
     assert "Admin + Entry" in session.describe()
+
+
+def test_initial_accounts_allow_login_without_creating_gate_traffic(qapp):
+    from askari_vms.storage import Store
+    from askari_vms.settings import default_settings
+    from askari_vms.ui.pages.login import LoginWindow
+
+    store = Store()
+    # Hardware configuration can exist before the first operator signs in.
+    store.settings.save(default_settings())
+    try:
+        assert store.seed_accounts_if_empty()
+        login = LoginWindow(store, workstation="Admin + Entry")
+        login.username.setText("operator01")
+        login.password.setText("change-me-123")
+        session = login.sign_in()
+        assert session is not None and session.role == UserRole.OPERATOR
+        assert authenticate(store.users.list(), "admin", "change-me-123")[0] is not None
+        assert store.visits.count() == store.etags.count() == store.etag_events.count() == 0
+        assert store.audit.list()[0].target == "Initial user accounts"
+        login.close()
+    finally:
+        store.close()
+
+
+def test_initial_account_setup_never_resets_existing_users():
+    from askari_vms.storage import Store
+
+    store = Store()
+    existing = account(password="my-new-password", status="Deactivated")
+    try:
+        store.users.save(existing)
+        assert not store.seed_accounts_if_empty()
+        assert store.users.list() == [existing]
+        assert store.audit.count() == 0
+    finally:
+        store.close()
