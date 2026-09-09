@@ -44,10 +44,54 @@ def _clean(text: str) -> str:
     return " ".join(re.sub(r"^[\s:.-]+", "", text).split())
 
 
+def _squash(text: str) -> str:
+    """Lowercase, with every space and punctuation mark removed.
+
+    The detector frequently runs a caption's words together — 'FatherName',
+    'DateofBirth' — so a caption can only be recognised with the spacing ignored.
+    """
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _label_end(line: str, label: str) -> int | None:
+    """Index in `line` just past `label`, ignoring the spacing the detector dropped.
+
+    Matching happens on the squashed text, but the value has to be cut out of the
+    original line, so the position of every squashed character is kept to map back.
+    """
+    target = _squash(label)
+    if not target:
+        return None
+    positions = [index for index, character in enumerate(line) if character.isalnum()]
+    squashed = "".join(line[index].lower() for index in positions)
+    at = squashed.find(target)
+    if at < 0:
+        return None
+    return positions[at + len(target) - 1] + 1
+
+
+def _has_label(text: str, alternatives: tuple[str, ...]) -> bool:
+    return any(_label_end(text, label) is not None for label in alternatives)
+
+
 def _is_label(text: str, labels: dict[str, tuple[str, ...]]) -> bool:
     """True when a line is one of the field captions rather than a value."""
-    lower = text.lower()
-    return any(name in lower for alternatives in labels.values() for name in alternatives)
+    return any(_has_label(text, alternatives) for alternatives in labels.values())
+
+
+# 'Waleed Bin Nasir' comes back as 'WaleedBinNasir' often enough to be worth undoing.
+# Only a single unbroken token is split, and only where a lowercase letter is followed
+# by a capital, so an all-capitals name is left exactly as printed.
+_RUN_ON_NAME_RE = re.compile(r"(?<=[a-z])(?=[A-Z])")
+
+
+def _split_run_on_name(value: str) -> str:
+    # Per word, because only part of a name may be run together: the detector returned
+    # 'ShakeelAnwar Tabassum' for a three-word name.
+    return " ".join(
+        _RUN_ON_NAME_RE.sub(" ", word) if word.isalpha() else word
+        for word in value.split()
+    )
 
 
 def parse_identity_text(
@@ -90,8 +134,7 @@ def parse_identity_text(
         date_values = [(i, match) for i, match in date_values if match is not None]
         for key, alternatives in date_labels.items():
             label_index = next((
-                i for i, text in enumerate(normal)
-                if any(label in text.lower() for label in alternatives)
+                i for i, text in enumerate(normal) if _has_label(text, alternatives)
             ), None)
             if label_index is None:
                 continue
@@ -121,9 +164,8 @@ def parse_identity_text(
     }
 
     def _date_key(text: str) -> str | None:
-        lower = text.lower()
         return next((key for key, names in date_keys.items()
-                     if any(name in lower for name in names)), None)
+                     if _has_label(text, names)), None)
 
     index = 0
     while index < len(normal):
@@ -143,16 +185,22 @@ def parse_identity_text(
         index = cursor if values else index + len(run)
 
     for index, line in enumerate(normal):
-        lower = line.lower()
+        squashed = _squash(line)
         for key, alternatives in labels.items():
             if key in fields:
                 continue
-            if key == "visitor_name" and any(word in lower for word in ("father", "husband")):
+            # 'Father Name' also contains 'Name'. The holder's own name is captioned
+            # 'Name' alone, so a caption mentioning a relative is never theirs.
+            if key == "visitor_name" and any(word in squashed for word in ("father", "husband")):
                 continue
-            label = next((value for value in alternatives if value in lower), None)
-            if label is None:
+            end = next(
+                (found for found in (_label_end(line, value) for value in alternatives)
+                 if found is not None),
+                None,
+            )
+            if end is None:
                 continue
-            candidate = _clean(line[lower.find(label) + len(label):])
+            candidate = _clean(line[end:])
             confidence = scores[index]
             if "date" in key and not DATE_RE.search(candidate):
                 # The value may have been merged onto the next detected line.
@@ -171,6 +219,8 @@ def parse_identity_text(
             if "date" in key:
                 date = DATE_RE.search(candidate)
                 candidate = date.group(0) if date else ""
+            elif "name" in key:
+                candidate = _split_run_on_name(candidate)
             if candidate:
                 fields[key] = OCRField(candidate, confidence)
     return fields

@@ -121,3 +121,57 @@ def test_geometry_resolves_the_merged_card_completely() -> None:
 def test_a_separated_cnic_still_parses_on_its_own_line() -> None:
     fields = parse_identity_text(["Identity Number", "35202-7654321-9"], [0.9, 0.95])
     assert fields["cnic"].value == "35202-7654321-9"
+
+
+# ---------------- captions the detector runs together ----------------
+
+def test_a_caption_printed_without_its_space_is_still_recognised() -> None:
+    """The detector returns 'FatherName', so a space in the caption cannot be assumed.
+
+    Verbatim from a real capture: the father's name sat on the next line at 0.99
+    confidence and was being discarded because 'father name' is not in 'fathername'.
+    """
+    fields = parse_identity_text(
+        ["Name", "WaleedBinNasir", "FatherName", "Nasir Mahmood"],
+        [0.98, 1.00, 0.97, 0.99],
+    )
+    assert fields["father_name"].value == "Nasir Mahmood"
+    assert fields["visitor_name"].value == "Waleed Bin Nasir"
+
+
+def test_a_run_together_caption_is_not_mistaken_for_the_holders_own_name() -> None:
+    # 'FatherName' contains 'Name'. Without the guard the father's name is filed as
+    # the visitor's, which is worse than leaving it blank.
+    fields = parse_identity_text(["FatherName", "Nasir Mahmood"], [0.97, 0.99])
+    assert "visitor_name" not in fields
+    assert fields["father_name"].value == "Nasir Mahmood"
+
+
+def test_date_captions_survive_lost_spacing_too() -> None:
+    fields = parse_identity_text(
+        ["DateofBirth", "20.10.1998", "DateofIssue", "28.03.2018"],
+        [0.99, 1.00, 0.98, 1.00],
+    )
+    assert fields["date_of_birth"].value == "20.10.1998"
+    assert fields["cnic_issue_date"].value == "28.03.2018"
+
+
+# ---------------- names the detector runs together ----------------
+
+def test_only_part_of_a_name_may_be_run_together() -> None:
+    # Real capture: 'ShakeelAnwar Tabassum' for a three-word name.
+    fields = parse_identity_text(
+        ["Father Name", "ShakeelAnwar Tabassum"], [0.95, 0.93],
+    )
+    assert fields["father_name"].value == "Shakeel Anwar Tabassum"
+
+
+def test_a_name_printed_in_capitals_is_left_exactly_as_it_is() -> None:
+    """Splitting on every capital would turn 'SANA MALIK' into nonsense."""
+    fields = parse_identity_text(["Name", "SANA MALIK"], [0.98, 0.91])
+    assert fields["visitor_name"].value == "SANA MALIK"
+
+
+def test_a_normally_spaced_name_is_untouched() -> None:
+    fields = parse_identity_text(["Name", "Muhammad Rehan Irfan Baig"], [0.98, 0.95])
+    assert fields["visitor_name"].value == "Muhammad Rehan Irfan Baig"
