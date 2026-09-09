@@ -114,6 +114,19 @@ All on Dahua SDK port `37777`. Assign each to Visitor Entry / Visitor Exit in Se
 ### Peripherals
 
 - **ID card camera** — plain USB webcam in a fixed box at Entry, captures the full frame.
+  The feed **reconnects on its own**: `camera_link.py` holds the policy (pure, no Qt) and
+  the entry portal runs it on a 500 ms watchdog. Loss is detected by *silence* as well as
+  by errors, because the common USB failure emits no error at all — the camera still
+  reports itself active while frames stop. Three seconds of silence, or ten with no first
+  frame, counts as lost; retries back off 1→2→4→8→10s and then continue at 10s forever,
+  since nobody restarts the app overnight. `QMediaDevices.videoInputsChanged` pulls the
+  next retry forward, so a replug reconnects at once. Each attempt builds a **new**
+  `QCamera` from a fresh enumeration: a handle to an unplugged device is dead and holding
+  it can stop Windows handing the device back. The camera is matched by **description,
+  not index**, because the device list reorders across a replug and index 0 can become
+  the laptop's built-in webcam. A deliberate stop (during OCR, or on close) is never
+  mistaken for a fault. Measured on the bench: a silently destroyed camera was detected
+  and back live in **4.7 s**.
 - **Barcode scanner** — **Honeywell MK7120 Orbit** (`MK7120-31A38`), USB
   omnidirectional presentation scanner, Exit only. The `-31` suffix is USB
   keyboard-wedge: it types the decoded barcode into whatever field has focus, so no

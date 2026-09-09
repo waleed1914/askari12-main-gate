@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -435,3 +436,87 @@ def test_the_emblem_appears_on_the_entry_header(qapp) -> None:
     emblem = page.findChild(QLabel, "brandLogo")
     assert emblem is not None and not emblem.pixmap().isNull()
     assert emblem.width() == HEADER_LOGO_SIZE
+
+
+# ---------------- ID camera auto-reconnect ----------------
+
+class _CameraReader:
+    """A CNIC reader that claims a camera, so the portal starts its watchdog."""
+
+    camera_index = 0
+
+    def capture_and_read(self):  # pragma: no cover - never reached in these tests
+        raise AssertionError("these tests never capture")
+
+
+def _portal_without_a_camera(monkeypatch):
+    """Build an entry portal on a machine that reports no cameras at all.
+
+    Patched before construction for two reasons: the result must not depend on whatever
+    webcam this developer machine happens to have, and a test must never switch on a
+    real camera as a side effect.
+    """
+    from askari_vms.ui.pages.entry_portal import EntryPortalWindow
+
+    monkeypatch.setattr(
+        "askari_vms.ui.pages.entry_portal.QMediaDevices.videoInputs",
+        staticmethod(lambda: []),
+    )
+    return EntryPortalWindow(cnic_reader=_CameraReader())
+
+
+def test_a_missing_id_camera_keeps_retrying_instead_of_giving_up(qapp, monkeypatch) -> None:
+    """A camera absent at start-up must still be picked up when it is plugged in."""
+    from askari_vms.camera_link import LinkState
+
+    portal = _portal_without_a_camera(monkeypatch)
+
+    assert portal._camera_timer is not None and portal._camera_timer.isActive()
+    assert portal._link.state is LinkState.LOST
+    assert "no camera found" in portal.cnic_panel.state.text()
+
+    # Someone plugs a camera in: Qt reports the device list changed, and the next tick
+    # of the watchdog tries again rather than waiting out the backoff.
+    portal._id_devices_changed()
+    portal._camera_tick()
+    assert portal._link.attempts == 1
+    assert portal._link.state is LinkState.LOST  # still nothing there, so still trying
+
+
+def test_a_camera_error_is_shown_and_scheduled_for_reconnect(qapp, monkeypatch) -> None:
+    from askari_vms.camera_link import LinkState
+
+    portal = _portal_without_a_camera(monkeypatch)
+    portal._link.starting(time.monotonic())
+
+    portal._id_camera_error(None, "Camera not ready")
+    assert portal._link.state is LinkState.LOST
+    assert "Camera not ready" in portal.cnic_panel.state.text()
+
+
+def test_capturing_a_card_is_not_mistaken_for_a_lost_camera(qapp, monkeypatch) -> None:
+    """The portal stops the feed itself while it OCRs, and must not reconnect over it."""
+    from askari_vms.camera_link import LinkState
+
+    portal = _portal_without_a_camera(monkeypatch)
+    portal._link.frame(time.monotonic())
+    portal._link.stopped()
+
+    # Long enough that a stall would have been declared, had this been a fault.
+    portal._camera_tick()
+    assert portal._link.state is LinkState.STOPPED
+
+    # A stop can itself raise an error from the driver. Still not a fault.
+    portal._id_camera_error(None, "device stopped")
+    assert portal._link.state is LinkState.STOPPED
+
+
+def test_closing_the_portal_stops_the_watchdog(qapp, monkeypatch) -> None:
+    """Otherwise the watchdog reopens the very camera the window is shutting down."""
+    from askari_vms.camera_link import LinkState
+
+    portal = _portal_without_a_camera(monkeypatch)
+    portal.close()
+
+    assert not portal._camera_timer.isActive()
+    assert portal._link.state is LinkState.STOPPED

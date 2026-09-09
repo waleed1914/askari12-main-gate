@@ -10,13 +10,16 @@ blank, and the gate still opens. What is missing is recorded, not prevented.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QImage, QKeySequence, QPixmap, QShortcut
-from PySide6.QtMultimedia import QCamera, QMediaCaptureSession, QMediaDevices, QVideoFrame, QVideoSink
+from PySide6.QtMultimedia import (
+    QCamera, QCameraDevice, QMediaCaptureSession, QMediaDevices, QVideoFrame, QVideoSink,
+)
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -24,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from askari_vms.audit import AuditLog, AuditSeverity
 from askari_vms.auth import Session
+from askari_vms.camera_link import NO_DEVICE, UNPLUGGED, CameraLink, LinkState
 from askari_vms.ui.brand import circular_logo
 from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
@@ -43,6 +47,11 @@ DICTATE_KEY = "Ctrl+D"
 SUBMIT_KEY = "Ctrl+Return"
 CLEAR_KEY = "Ctrl+N"
 CAPTURE_KEY = "Ctrl+K"
+
+# How often the camera watchdog checks for a stalled feed. Twice a second is well below
+# the stall timeout and costs nothing.
+CAMERA_TICK_MS = 500
+LIVE_PROMPT = "Live — place ID card flat, then press Capture"
 
 # In the operator's order of use: ANPR fills the plate, so the first thing they type or
 # speak is the destination, then the OCR result is corrected downwards.
@@ -192,6 +201,10 @@ class EntryPortalWindow(QWidget):
         self._id_video_sink: QVideoSink | None = None
         self._latest_id_image = QImage()
         self._preview_frame_count = 0
+        self._link = CameraLink()
+        self._id_device_name = ""
+        self._media_devices: QMediaDevices | None = None
+        self._camera_timer: QTimer | None = None
 
         self.setWindowTitle("Askari VMS — Entry Portal")
         self.setObjectName("appRoot")
@@ -501,6 +514,8 @@ class EntryPortalWindow(QWidget):
                 if not self._latest_id_image.save(str(path), "JPG", 95):
                     raise OSError("Qt could not encode the image")
                 image_path = str(path)
+                # Ours, not a fault: tell the watchdog before the frames stop.
+                self._link.stopped()
                 self._id_camera.stop()
             except (AttributeError, OSError) as exc:
                 self._cnic_failed(f"ID card image could not be saved: {exc}")
@@ -523,32 +538,131 @@ class EntryPortalWindow(QWidget):
         return True
 
     def _start_id_camera(self) -> bool:
-        """Start a persistent Windows/Qt live feed so focus settles before capture."""
+        """Start a persistent Windows/Qt live feed so focus settles before capture.
+
+        The feed is then kept up for the rest of the shift by the watchdog below: an
+        operator should never have to restart the application because a cable was
+        knocked, and a camera that is missing at start-up may well be plugged in a
+        minute later.
+        """
         if self._cnic_reader is None or not hasattr(self._cnic_reader, "camera_index"):
             return False
+        # Qt reports plug and unplug, which turns most reconnects into an immediate
+        # retry rather than a wait for the backoff to expire.
+        self._media_devices = QMediaDevices(self)
+        self._media_devices.videoInputsChanged.connect(self._id_devices_changed)
+        self._camera_timer = QTimer(self)
+        self._camera_timer.setInterval(CAMERA_TICK_MS)
+        self._camera_timer.timeout.connect(self._camera_tick)
+        self._camera_timer.start()
+        return self._open_id_camera()
+
+    def _pick_id_device(self) -> QCameraDevice | None:
+        """Prefer the camera we were already using, by name.
+
+        `camera_index` is a position in Qt's device list, and that list reorders when a
+        device is unplugged and returns. After a reconnect index 0 can easily be the
+        laptop's built-in webcam rather than the card-box camera, so the remembered
+        description wins once we have one.
+        """
         devices = QMediaDevices.videoInputs()
+        if not devices:
+            return None
+        if self._id_device_name:
+            for device in devices:
+                if device.description() == self._id_device_name:
+                    return device
         index = int(getattr(self._cnic_reader, "camera_index", 0))
-        if not 0 <= index < len(devices):
-            self.cnic_panel.set_state(f"ID camera {index} not found")
+        return devices[index] if 0 <= index < len(devices) else None
+
+    def _open_id_camera(self) -> bool:
+        """Build a brand-new camera and start it. Safe to call repeatedly."""
+        self._teardown_id_camera()
+        now = time.monotonic()
+        # Declare the intent before looking for hardware. Otherwise a camera that is
+        # missing at start-up leaves the link still "stopped", the failure is taken for
+        # a deliberate one, and no retry is ever scheduled.
+        self._link.starting(now)
+        device = self._pick_id_device()
+        if device is None:
+            self._link.failed(now, NO_DEVICE)
+            self._show_camera_state()
             return False
-        self._id_camera = QCamera(devices[index], self)
+
+        self._id_device_name = device.description()
+        self._id_camera = QCamera(device, self)
         self._id_camera_session = QMediaCaptureSession(self)
         self._id_video_sink = QVideoSink(self)
         self._id_camera_session.setCamera(self._id_camera)
         self._id_camera_session.setVideoSink(self._id_video_sink)
         self._id_video_sink.videoFrameChanged.connect(self._id_frame_changed)
-        self._id_camera.errorOccurred.connect(
-            lambda _error, text: self.cnic_panel.set_state(f"Camera error — {text}")
-        )
+        self._id_camera.errorOccurred.connect(self._id_camera_error)
         self.cnic_panel.set_state("Starting live camera…")
         self._id_camera.start()
         return True
+
+    def _teardown_id_camera(self) -> None:
+        """Drop the camera objects completely rather than reusing them.
+
+        A handle to a device that has been unplugged is dead — restarting it fails —
+        and keeping it open can stop Windows from handing the device back when it
+        returns. So every reconnect gets fresh objects.
+        """
+        for signal, slot in (
+            (getattr(self._id_video_sink, "videoFrameChanged", None), self._id_frame_changed),
+            (getattr(self._id_camera, "errorOccurred", None), self._id_camera_error),
+        ):
+            if signal is not None:
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass  # Already gone; nothing to detach.
+        if self._id_camera is not None:
+            self._id_camera.stop()
+        if self._id_camera_session is not None:
+            self._id_camera_session.setCamera(None)
+            self._id_camera_session.setVideoSink(None)
+        for obj in (self._id_camera, self._id_camera_session, self._id_video_sink):
+            if obj is not None:
+                obj.deleteLater()
+        self._id_camera = None
+        self._id_camera_session = None
+        self._id_video_sink = None
+
+    @Slot()
+    def _camera_tick(self) -> None:
+        """Watchdog. Declares a silent feed lost, and reopens when a retry falls due."""
+        now = time.monotonic()
+        if self._link.poll(now):
+            self._open_id_camera()
+        elif self._link.state is LinkState.LOST:
+            self._show_camera_state()  # keep the countdown moving
+
+    @Slot()
+    def _id_devices_changed(self) -> None:
+        """A camera was plugged in or pulled out."""
+        now = time.monotonic()
+        if self._link.state in (LinkState.STARTING, LinkState.LIVE) and self._pick_id_device() is None:
+            self._link.failed(now, UNPLUGGED)
+            self._teardown_id_camera()
+            self._show_camera_state()
+            return
+        self._link.devices_changed(now)
+
+    @Slot(object, str)
+    def _id_camera_error(self, _error: object, text: str) -> None:
+        self._link.failed(time.monotonic(), text or "camera error")
+        self._show_camera_state()
+
+    def _show_camera_state(self) -> None:
+        self.cnic_panel.set_state(self._link.describe(time.monotonic()))
 
     @Slot(QVideoFrame)
     def _id_frame_changed(self, frame: QVideoFrame) -> None:
         image = frame.toImage()
         if image.isNull():
             return
+        self._link.frame(time.monotonic())
         self._latest_id_image = image.copy()
         self._preview_frame_count += 1
         if self._preview_frame_count % 3:
@@ -560,7 +674,7 @@ class EntryPortalWindow(QWidget):
         )
         self.cnic_panel.preview.setPixmap(pixmap)
         self.cnic_panel.preview.show()
-        self.cnic_panel.set_state("Live — place ID card flat, then press Capture", live=True)
+        self.cnic_panel.set_state(LIVE_PROMPT, live=True)
 
     @Slot()
     def _capture_finished(self) -> None:
@@ -711,10 +825,15 @@ class EntryPortalWindow(QWidget):
         self._captured = {key: False for key in self._captured}
         self.cnic_panel.set_state("No feed")
         self.cnic_panel.clear_image()
-        if self._id_camera is not None:
+        if self._camera_timer is not None:
             self._latest_id_image = QImage()
             self.cnic_panel.set_state("Starting live camera…")
-            self._id_camera.start()
+            if self._id_camera is not None:
+                self._link.starting(time.monotonic())
+                self._id_camera.start()
+            else:
+                # Lost while the last visitor was being processed. Take it back now.
+                self._open_id_camera()
         for panel in self._streams.values():
             panel.set_state("No feed")
         self.notice.hide()
@@ -725,8 +844,11 @@ class EntryPortalWindow(QWidget):
         self.fields["destination"].setFocus()
 
     def closeEvent(self, event) -> None:
-        if self._id_camera is not None:
-            self._id_camera.stop()
+        # Stop the watchdog first, or it reopens the camera we are shutting down.
+        if self._camera_timer is not None:
+            self._camera_timer.stop()
+        self._link.stopped()
+        self._teardown_id_camera()
         super().closeEvent(event)
 
     def build_visit(self) -> VisitRecord:
