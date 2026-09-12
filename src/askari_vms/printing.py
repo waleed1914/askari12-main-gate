@@ -208,6 +208,36 @@ class WindowsRawPrinter:
             win32print.ClosePrinter(handle)
 
 
+class DirectUsbPrinter:
+    """Send ESC/POS to the attached POS80 USB endpoint without a print queue.
+
+    The tested SNC-830 identifies as VID_0416/PID_5011. Direct access avoids Windows
+    reassigning USB001/USB002 and does not require the unsigned vendor installer.
+    """
+
+    def __init__(self, vid: str = "0416", pid: str = "5011") -> None:
+        self.vid = vid.casefold()
+        self.pid = pid.casefold()
+
+    def print_bytes(self, payload: bytes) -> None:
+        try:
+            from askari_vms.usb_printer import device_paths, write_direct
+
+            matches = [
+                path for path in device_paths()
+                if f"vid_{self.vid}" in path.casefold() and f"pid_{self.pid}" in path.casefold()
+            ]
+            if not matches:
+                raise PrinterError("SNC-830 receipt printer is not connected")
+            written = write_direct(matches[0], payload)
+            if written != len(payload):
+                raise PrinterError(f"receipt printer accepted only {written} of {len(payload)} bytes")
+        except PrinterError:
+            raise
+        except OSError as exc:
+            raise PrinterError(f"receipt printer USB write failed: {exc}") from exc
+
+
 def available_printers() -> list[str]:
     """Windows print queue names, for the Settings dropdown. Empty when unavailable."""
     try:

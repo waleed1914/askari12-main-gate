@@ -86,6 +86,15 @@ def test_a_category_shortcut_selects_its_category(portal) -> None:
     assert portal._selected.name == "Truck", "a miss must not clear the selection"
 
 
+def test_category_workflow_captures_and_submits(portal) -> None:
+    fill(portal)
+    assert portal.run_category_workflow(default_categories()[0]) is True
+    decision = next(e for e in portal._audit.events() if e.action == "Visitor decision")
+    assert decision.target == "VIS-000008"
+    assert "Receipt printed successfully" in decision.details
+    assert portal.fields["visitor_name"].text() == "", "the next visitor form is ready"
+
+
 def test_submitting_records_the_visit_and_opens_the_gate(portal) -> None:
     fill(portal)
     portal.choose_shortcut("F1")

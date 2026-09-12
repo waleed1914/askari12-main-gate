@@ -12,6 +12,8 @@ dependencies = [
     "opencv-python>=4.13,<6",
     "rapidocr>=3.9,<4",
     "onnxruntime>=1.22,<2",
+    "sounddevice>=0.5,<1",
+    "vosk>=0.3.45,<1",
     # Receipt printing sends RAW bytes to a Windows print queue. Imported lazily, so
     # the app still runs without it, but a gate PC always needs it.
     "pywin32>=306; sys_platform == 'win32'",

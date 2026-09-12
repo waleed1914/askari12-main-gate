@@ -16,6 +16,9 @@ venv/
 # CNIC scans, which must never leave this machine.
 .local-captures/
 
+# Manufacturer installers/manual bundles used for bench setup, never application code.
+.vendor/
+
 # Runtime data lives in C:\AskariVMS, never in the repo. Belt and braces.
 *.sqlite3
 *.sqlite3-wal

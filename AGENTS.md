@@ -13,8 +13,9 @@ copy — see [Provenance](#provenance).
 
 ## 1. Status
 
-**Milestone 1 (done):** shared desktop foundation + Admin portal shell. All hardware
-sits behind adapters that are not yet written; every device call is simulated.
+**Milestone 1 (done):** shared desktop foundation + Admin portal shell. Hardware stays
+behind adapters. Entry ANPR, driver snapshots, USB CNIC camera, offline dictation and
+direct USB receipt printing are integrated; physical gate commands remain simulated.
 
 Implemented: Vehicle Categories, E-Tags, Users, Audit Logs, Door Controls, Settings,
 E-Tag Logs, VMS Operations, Reports, and the **Entry portal**. The Dashboard is still
@@ -81,8 +82,8 @@ missed cameras submit and are listed too; both raise the event to WARNING. A pla
 an open visit warns and still allows. A returning vehicle or CNIC is *offered* for reuse
 and never auto-filled — photographs are always taken fresh.
 
-**Not built yet:** the Dashboard (still four zeroed cards), Exit portal, and every
-hardware adapter.
+**Not built yet:** the Dashboard (still four zeroed cards), Exit portal, controller
+event/card synchronization, and physical gate-command integration.
 
 Stack: Python 3.12 + PySide6 (Qt6), `pytest`. Entry point `python -m askari_vms`.
 
@@ -142,7 +143,7 @@ empty path. Exit and VMS detail show the saved entry driver photograph. Clearing
 form prevents the preceding visitor's cached frame from being reused. Missing or
 stale frames and image write failures flag missing evidence and still allow submit.
 Entry ANPR detection is also integrated as described above. Other IP camera feeds,
-printing and gate commands remain simulated.
+gate commands remain simulated.
 
 Recovered from the ConfigTool scan. E-tag lanes have **no cameras**; the controller
 already knows who the holder is, so only event data is needed there.
@@ -178,14 +179,19 @@ All on Dahua SDK port `37777`. Assign each to Visitor Entry / Visitor Exit in Se
   driver and no adapter are needed. CODE39 is enabled by default, which is the symbology
   our receipts print. The Exit search box just has to keep focus and treat Enter as
   submit.
-- **Receipt printer** — **Black Copper BC-85AC**, 80mm thermal with auto-cutter, Entry
-  only (Exit has no printer and needs none). Enumerates as
+- **Receipt printer** — **SONIC SNC-830**, 80mm thermal with auto-cutter, Entry only
+  (Exit has no printer and needs none). Its USB hardware identifies as
   `STMicroelectronics POS80 Printer USB`, `VID_0416/PID_5011`, USB printer class
-  (`Class_07/SubClass_01/Prot_02`, service `usbprint`) on port `USB001`.
-  Standard ESC/POS. Windows needs a print queue bound to that port — installed here as
-  **`Askari Receipt Printer`** using the built-in *Generic / Text Only* driver, which
-  passes RAW bytes through untouched. Use the same queue name on the client PC and no
-  code changes are needed; the name is the `receipt_printer` value in Settings.
+  (`Class_07/SubClass_01/Prot_02`, service `usbprint`). Standard ESC/POS. It was proven
+  on paper after correcting the thermal-paper orientation. `DirectUsbPrinter` selects
+  VID/PID and writes to the USB printer-class endpoint directly, avoiding unstable
+  USB001/USB002 assignments and the unsigned vendor installer.
+
+- **Destination microphone** — Windows device name `Microphone (USB Microphone)`.
+  `speech.py` records while Ctrl+D is held and transcribes locally with Vosk model
+  `vosk-model-small-en-us-0.15`. The model is intentionally outside Git under
+  `C:\AskariVMS\models`. Spoken number words are normalized to digits: `four zero seven`
+  becomes `407`, `twenty five` becomes `25`, and `one hundred and five` becomes `105`.
 
 ### Brand
 
@@ -468,11 +474,8 @@ Audit events now carry the signed-in operator and workstation. The `system` /
 
 ## 11. Open items
 
-- Printing is **not yet proven on paper**: the queue accepts jobs, the spooler clears
-  them and the printer feeds and cuts on command, but every test slip came out blank —
-  including solid `#` blocks at maximum heating. That points at the paper (loaded upside
-  down, or not thermal stock) rather than the data path. Confirm with the BC-85AC
-  power-on self-test: hold FEED while switching on.
+- Receipt printing is proven on paper. The earlier blank slips were caused by reversed
+  thermal paper, not the ESC/POS payload or printer adapter.
 - Confirm `/GEvent.xml` reports rejected and unknown tags, on real hardware.
 - Second controller's IP is unassigned.
 - Entry driver camera confirmed by the user on 2026-09-09: `http://192.168.1.16/`.

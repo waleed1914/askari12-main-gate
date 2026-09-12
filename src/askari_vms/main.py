@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QApplication
 from askari_vms.audit import AuditLog
 from askari_vms.cnic_ocr import LocalCNICReader
 from askari_vms.ip_camera import entry_driver_feed
+from askari_vms.printing import DirectUsbPrinter
+from askari_vms.speech import OfflineDictation, default_model_path
 from askari_vms.anpr import entry_anpr_feed
 
 from askari_vms.routing import Portal, portal_for
@@ -100,6 +102,8 @@ def main() -> int:
                 driver_camera=entry_driver_feed(settings),
                 anpr_feed=entry_anpr_feed(settings),
                 image_directory=settings.storage.data_directory,
+                printer=DirectUsbPrinter(),
+                dictation=OfflineDictation(default_model_path(settings.storage.data_directory)),
             )
             window._audit.set_operator(session.operator, session.workstation)
             window._audit.record(

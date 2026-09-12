@@ -9,6 +9,7 @@ from askari_vms.printing import (
     WIDTH_58MM,
     WIDTH_80MM,
     FilePrinter,
+    DirectUsbPrinter,
     NullPrinter,
     PrinterError,
     ReceiptHeader,
@@ -92,6 +93,20 @@ def test_the_null_printer_accepts_and_keeps_the_job() -> None:
     printer = NullPrinter()
     assert print_receipt(printer, a_visit()) is True
     assert len(printer.jobs) == 1 and printer.jobs[0].startswith(INIT)
+
+
+def test_direct_usb_printer_selects_the_tested_snc830(monkeypatch) -> None:
+    import askari_vms.usb_printer as usb
+
+    paths = [
+        r"\\?\usb#vid_9999&pid_0001#other",
+        r"\\?\usb#vid_0416&pid_5011#snc830",
+    ]
+    writes = []
+    monkeypatch.setattr(usb, "device_paths", lambda: paths)
+    monkeypatch.setattr(usb, "write_direct", lambda path, payload: writes.append((path, payload)) or len(payload))
+    DirectUsbPrinter().print_bytes(b"receipt")
+    assert writes == [(paths[1], b"receipt")]
 
 
 def test_a_file_printer_writes_the_bytes(tmp_path) -> None:

@@ -16,13 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtMultimedia import (
     QCamera, QCameraDevice, QMediaCaptureSession, QMediaDevices, QVideoFrame, QVideoSink,
 )
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QPushButton, QScrollArea, QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -34,6 +34,8 @@ from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
 from askari_vms.etag_events import ETagEvent
 from askari_vms.ip_camera import SnapshotFeed
+from askari_vms.printing import NullPrinter, PrinterError, ReceiptPrinter, print_receipt
+from askari_vms.speech import OfflineDictation, SpeechError
 from askari_vms.anpr import ANPRFeed, normalize_plate
 from askari_vms.ui.event_styles import ROW_COLOURS, TEXT_COLOURS
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
@@ -105,6 +107,25 @@ class _CNICCaptureWorker(QObject):
             else:
                 self.completed.emit(self.reader.capture_and_read())
         except Exception as exc:  # hardware errors must return control to the operator
+            self.failed.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class _DictationWorker(QObject):
+    completed = Signal(str)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, adapter: OfflineDictation, audio: bytes) -> None:
+        super().__init__()
+        self.adapter, self.audio = adapter, audio
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.completed.emit(self.adapter.transcribe(self.audio))
+        except Exception as exc:
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
@@ -201,6 +222,8 @@ class EntryPortalWindow(QWidget):
         driver_camera: SnapshotFeed | None = None,
         image_directory: str = "",
         anpr_feed: ANPRFeed | None = None,
+        printer: ReceiptPrinter | None = None,
+        dictation: OfflineDictation | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -213,6 +236,10 @@ class EntryPortalWindow(QWidget):
         self._cnic_reader = cnic_reader
         self._driver_camera = driver_camera
         self._anpr_feed = anpr_feed
+        self._printer = printer if printer is not None else NullPrinter()
+        self._dictation = dictation
+        self._dictation_thread: QThread | None = None
+        self._dictation_worker: _DictationWorker | None = None
         self._anpr_timer: QTimer | None = None
         self._anpr_connected: bool | None = None
         self._anpr_after = time.monotonic()
@@ -228,6 +255,7 @@ class EntryPortalWindow(QWidget):
         self._cnic_image = ""
         self._reusable: VisitRecord | None = None
         self._dictating = False
+        self._category_workflow_pending = False
         self._capture_thread: QThread | None = None
         self._capture_worker: _CNICCaptureWorker | None = None
         self._id_camera: QCamera | None = None
@@ -255,6 +283,7 @@ class EntryPortalWindow(QWidget):
         self._build()
         self._start_id_camera()
         self._install_shortcuts()
+        QApplication.instance().installEventFilter(self)
         self.clear_form()
         if self._driver_camera is not None:
             self._driver_camera.start()
@@ -582,9 +611,9 @@ class EntryPortalWindow(QWidget):
         for category in self._categories:
             shortcut = QShortcut(QKeySequence(category.shortcut), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-            shortcut.activated.connect(lambda c=category: self.choose_category(c))
+            shortcut.activated.connect(lambda c=category: self.run_category_workflow(c))
         for key, slot in ((SUBMIT_KEY, self.submit), ("Ctrl+Enter", self.submit),
-                          (CLEAR_KEY, self.clear_form), (DICTATE_KEY, self.toggle_dictation),
+                          (CLEAR_KEY, self.clear_form),
                           (CAPTURE_KEY, self.capture)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
@@ -600,6 +629,26 @@ class EntryPortalWindow(QWidget):
             self.vehicle_type.blockSignals(False)
         self.status.setText(f"Vehicle type set to {category.name} ({category.shortcut}).")
 
+    def run_category_workflow(self, category: VehicleCategory) -> bool:
+        """The category key is the operator's final confirmation for Entry."""
+        if self._category_workflow_pending or self._capture_thread is not None:
+            self.status.setText("Visitor capture is already in progress…")
+            return False
+        self.choose_category(category)
+        self._category_workflow_pending = True
+        self.capture()
+        # Real CNIC OCR finishes asynchronously. Simulation or a camera that could not
+        # start has no worker to wait for, so continue immediately and record gaps.
+        if self._capture_thread is None:
+            self._finish_category_workflow()
+        return True
+
+    def _finish_category_workflow(self) -> None:
+        if not self._category_workflow_pending:
+            return
+        self._category_workflow_pending = False
+        self.submit()
+
     def _vehicle_type_changed(self, name: str) -> None:
         match = next((c for c in self._categories if c.name == name), None)
         if match is not None:
@@ -613,12 +662,77 @@ class EntryPortalWindow(QWidget):
         return True
 
     def toggle_dictation(self) -> None:
-        self._dictating = not self._dictating
         if self._dictating:
-            self.fields["destination"].setFocus()
-            self.status.setText("Listening for destination… (speech adapter not enabled — type instead)")
+            self.stop_dictation()
         else:
-            self.status.setText("Dictation stopped.")
+            self.start_dictation()
+
+    def eventFilter(self, watched, event) -> bool:
+        key_event = event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease)
+        if key_event and self.isVisible() and QApplication.activeWindow() is self and event.key() == Qt.Key.Key_D:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                if event.isAutoRepeat():
+                    return True
+                if event.type() == QEvent.Type.KeyPress:
+                    self.start_dictation()
+                    return True
+                if event.type() == QEvent.Type.KeyRelease:
+                    self.stop_dictation()
+                    return True
+        return super().eventFilter(watched, event)
+
+    def start_dictation(self) -> bool:
+        self.fields["destination"].setFocus()
+        if self._dictation is None:
+            self.status.setText("Destination microphone is not configured — type manually.")
+            return False
+        if self._dictating or self._dictation_thread is not None:
+            return False
+        try:
+            self._dictation.start()
+        except SpeechError as exc:
+            self.status.setText(f"Microphone unavailable: {exc}. Type the destination manually.")
+            return False
+        self._dictating = True
+        self.status.setText("Listening… keep holding Ctrl+D and speak the destination.")
+        return True
+
+    def stop_dictation(self) -> bool:
+        if not self._dictating or self._dictation is None:
+            return False
+        self._dictating = False
+        audio = self._dictation.stop()
+        self.status.setText("Recognizing destination offline…")
+        thread = QThread(self)
+        worker = _DictationWorker(self._dictation, audio)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._dictation_complete)
+        worker.failed.connect(self._dictation_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._dictation_finished)
+        self._dictation_thread, self._dictation_worker = thread, worker
+        thread.start()
+        return True
+
+    @Slot(str)
+    def _dictation_complete(self, text: str) -> None:
+        if text:
+            self.fields["destination"].setText(text)
+            self.status.setText(f"Destination heard: {text}. Check it before pressing the category key.")
+        else:
+            self.status.setText("No speech recognized. Hold Ctrl+D and try again, or type manually.")
+
+    @Slot(str)
+    def _dictation_failed(self, message: str) -> None:
+        self.status.setText(f"Destination dictation failed: {message}. Type manually.")
+
+    @Slot()
+    def _dictation_finished(self) -> None:
+        self._dictation_thread = None
+        self._dictation_worker = None
 
     def capture(self) -> None:
         """Capture every source. A camera failure never blocks the transaction."""
@@ -839,6 +953,7 @@ class EntryPortalWindow(QWidget):
         self._captured["cnic"] = False
         self.cnic_panel.set_state(f"Capture failed — {message}")
         self.status.setText(f"ID card capture failed: {message}. You may type the details manually.")
+        self._finish_category_workflow()
 
     @Slot(object)
     def _apply_cnic_capture(self, capture: CNICCapture) -> None:
@@ -861,6 +976,7 @@ class EntryPortalWindow(QWidget):
         else:
             self.cnic_panel.set_state("Captured — no readable text", live=True)
             self.status.setText("Image saved, but OCR found no readable text. Adjust focus/light or type manually.")
+        self._finish_category_workflow()
 
     def choose_cnic_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1023,6 +1139,10 @@ class EntryPortalWindow(QWidget):
             self._camera_timer.stop()
         self._link.stopped()
         self._teardown_id_camera()
+        QApplication.instance().removeEventFilter(self)
+        if self._dictation is not None and self._dictating:
+            self._dictation.stop()
+            self._dictating = False
         super().closeEvent(event)
 
     def build_visit(self) -> VisitRecord:
@@ -1062,7 +1182,13 @@ class EntryPortalWindow(QWidget):
             details.append("Submitted with missing data: " + ", ".join(gaps) + ".")
         if uncaptured:
             details.append("No image captured from: " + ", ".join(uncaptured) + ".")
-        details.append("Receipt printing and the gate command are simulated until the adapters are enabled.")
+        print_errors: list[PrinterError] = []
+        printed = print_receipt(self._printer, visit, on_error=print_errors.append)
+        details.append(
+            "Receipt printed successfully." if printed else
+            "Receipt printing failed; operator continuation remains available."
+        )
+        details.append("Visitor Entry gate command is simulated until the controller adapter is enabled.")
 
         self._audit.record(
             action="Visitor decision",
@@ -1071,13 +1197,22 @@ class EntryPortalWindow(QWidget):
             details=" ".join(details),
             severity=AuditSeverity.WARNING if (gaps or uncaptured) else AuditSeverity.INFO,
         )
+        if print_errors:
+            self._audit.record(
+                action="Hardware event",
+                target="Entry printer",
+                summary="Receipt printer unavailable",
+                details=f"Visit {visit.visit_id}: {print_errors[0]}. Gate workflow was not blocked.",
+                severity=AuditSeverity.CRITICAL,
+            )
         self._audit.record(
             action="Gate command",
             target="Visitor Entry",
             summary=f"Visitor Entry opened for {visit.visit_id}",
             details=(
-                f"Receipt printed for {visit.visit_id} and Visitor Entry opened automatically. "
-                "Simulated: no physical command was transmitted."
+                (f"Receipt printed for {visit.visit_id}. " if printed else
+                 f"Receipt failed for {visit.visit_id}; operator continuation allowed. ")
+                + "Visitor Entry open is simulated: no physical command was transmitted."
             ),
         )
 
@@ -1085,7 +1220,8 @@ class EntryPortalWindow(QWidget):
             self._on_submit(visit)
         self.submitted.emit(visit)
 
-        message = f"{visit.visit_id} submitted. Receipt {visit.barcode} printed, Visitor Entry opened."
+        receipt_state = f"Receipt {visit.barcode} printed" if printed else "Receipt failed — check printer"
+        message = f"{visit.visit_id} submitted. {receipt_state}; Visitor Entry open is currently simulated."
         if gaps:
             message += "  Flagged as missing: " + ", ".join(gaps) + "."
         self.clear_form()
