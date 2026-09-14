@@ -15,7 +15,7 @@ copy — see [Provenance](#provenance).
 
 **Milestone 1 (done):** shared desktop foundation + Admin portal shell. Hardware stays
 behind adapters. Entry ANPR, driver snapshots, USB CNIC camera, offline dictation and
-direct USB receipt printing are integrated; physical gate commands remain simulated.
+direct USB receipt printing and the physical Visitor Entry gate command are integrated.
 
 Implemented: Vehicle Categories, E-Tags, Users, Audit Logs, Door Controls, Settings,
 E-Tag Logs, VMS Operations, Reports, and the **Entry portal**. The Dashboard is still
@@ -82,8 +82,8 @@ missed cameras submit and are listed too; both raise the event to WARNING. A pla
 an open visit warns and still allows. A returning vehicle or CNIC is *offered* for reuse
 and never auto-filled — photographs are always taken fresh.
 
-**Not built yet:** the Dashboard (still four zeroed cards), Exit portal, controller
-event/card synchronization, and physical gate-command integration.
+**Not built yet:** the Dashboard (still four zeroed cards), Exit portal, and controller
+event/card synchronization. Visitor Exit physical control is not integrated yet.
 
 Stack: Python 3.12 + PySide6 (Qt6), `pytest`. Entry point `python -m askari_vms`.
 
@@ -150,7 +150,7 @@ empty path. Exit and VMS detail show the saved entry driver photograph. Clearing
 form prevents the preceding visitor's cached frame from being reused. Missing or
 stale frames and image write failures flag missing evidence and still allow submit.
 Entry ANPR detection is also integrated as described above. Other IP camera feeds,
-gate commands remain simulated.
+Visitor Exit and Admin manual gate commands remain simulated.
 
 Recovered from the ConfigTool scan. E-tag lanes have **no cameras**; the controller
 already knows who the holder is, so only event data is needed there.
@@ -243,6 +243,13 @@ GET /cdor.cgi?open={cmd}&door={0|1}
 ```
 
 These four map exactly to `DoorCommand` in `src/askari_vms/controllers.py`.
+
+`gate_controller.py` implements this protocol without an internet proxy. Entry submit
+queues the Visitor Entry open request in a background worker so controller delay never
+freezes the operator UI. For the confirmed Entry wiring it sends `open=1&door=1`
+(physical Door 2). Success and failure are audited; failure tells the operator to open
+manually and never exposes credentials. The Windows generic-credential target is
+`AskariVMS/controller/entry/192.168.1.10`.
 
 **Live events** — poll at 500 ms, passing the last seen id:
 

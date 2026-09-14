@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -33,6 +34,8 @@ from askari_vms.ui.brand import circular_logo
 from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
 from askari_vms.etag_events import ETagEvent
+from askari_vms.gate_controller import GateController
+from askari_vms.controllers import DoorCommand
 from askari_vms.ip_camera import SnapshotFeed
 from askari_vms.printing import NullPrinter, PrinterError, ReceiptPrinter, print_receipt
 from askari_vms.speech import OfflineDictation, SpeechError
@@ -225,6 +228,7 @@ class EntryPortalWindow(QWidget):
         anpr_feed: ANPRFeed | None = None,
         printer: ReceiptPrinter | None = None,
         dictation: OfflineDictation | None = None,
+        gate_controller: GateController | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -240,6 +244,10 @@ class EntryPortalWindow(QWidget):
         self._anpr_feed = anpr_feed
         self._printer = printer if printer is not None else NullPrinter()
         self._dictation = dictation
+        self._gate_controller = gate_controller
+        self._gate_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="entry-gate") if gate_controller else None
+        self._gate_jobs: dict[Future, str] = {}
+        self._gate_timer: QTimer | None = None
         self._dictation_thread: QThread | None = None
         self._dictation_worker: _DictationWorker | None = None
         self._anpr_timer: QTimer | None = None
@@ -289,6 +297,10 @@ class EntryPortalWindow(QWidget):
         self._start_id_camera()
         self._install_shortcuts()
         QApplication.instance().installEventFilter(self)
+        if self._gate_controller is not None:
+            self._gate_timer = QTimer(self)
+            self._gate_timer.timeout.connect(self._poll_gate_jobs)
+            self._gate_timer.start(100)
         self.clear_form()
         if self._driver_camera is not None:
             self._driver_camera.start()
@@ -473,7 +485,10 @@ class EntryPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
-        mode = "ANPR auto-fill enabled · Gate simulated" if self._anpr_feed else (
+        if self._gate_controller is not None:
+            mode = "ANPR auto-fill enabled · Physical gate control enabled"
+        else:
+            mode = "ANPR auto-fill enabled · Gate simulated" if self._anpr_feed else (
             "Driver preview enabled · Gate simulated" if self._driver_camera else "Gate and IP cameras simulated")
         self.simulation = QLabel(mode)
         self.simulation.setProperty("status", "warning")
@@ -1189,7 +1204,41 @@ class EntryPortalWindow(QWidget):
         if self._dictation is not None and self._dictating:
             self._dictation.stop()
             self._dictating = False
+        if self._gate_timer is not None:
+            self._gate_timer.stop()
+        if self._gate_executor is not None:
+            self._gate_executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
+
+    def _queue_visitor_gate_open(self, visit_id: str) -> bool:
+        if self._gate_controller is None or self._gate_executor is None:
+            return False
+        future = self._gate_executor.submit(self._gate_controller.command, 1, DoorCommand.OPEN)
+        self._gate_jobs[future] = visit_id
+        return True
+
+    def _poll_gate_jobs(self) -> None:
+        for future, visit_id in list(self._gate_jobs.items()):
+            if not future.done():
+                continue
+            del self._gate_jobs[future]
+            try:
+                future.result()
+            except Exception as exc:
+                self._audit.record(
+                    action="Hardware event", target="Visitor Entry",
+                    summary=f"Visitor Entry failed to open for {visit_id}",
+                    details=f"{exc} Operator may open the barrier manually.",
+                    severity=AuditSeverity.CRITICAL,
+                )
+                self.status.setText(f"{visit_id}: gate did not open — {exc}")
+            else:
+                self._audit.record(
+                    action="Hardware event", target="Visitor Entry",
+                    summary=f"Visitor Entry opened for {visit_id}",
+                    details="Entry controller confirmed the Door 2 open HTTP command completed.",
+                )
+                self.status.setText(f"{visit_id}: Visitor Entry barrier opened successfully.")
 
     def build_visit(self) -> VisitRecord:
         return VisitRecord(
@@ -1234,7 +1283,11 @@ class EntryPortalWindow(QWidget):
             "Receipt printed successfully." if printed else
             "Receipt printing failed; operator continuation remains available."
         )
-        details.append("Visitor Entry gate command is simulated until the controller adapter is enabled.")
+        physical_gate = self._gate_controller is not None
+        details.append(
+            "Visitor Entry Door 2 open command queued." if physical_gate else
+            "Visitor Entry gate command is simulated until the controller adapter is enabled."
+        )
 
         self._audit.record(
             action="Visitor decision",
@@ -1254,20 +1307,26 @@ class EntryPortalWindow(QWidget):
         self._audit.record(
             action="Gate command",
             target="Visitor Entry",
-            summary=f"Visitor Entry opened for {visit.visit_id}",
+            summary=(f"Visitor Entry open requested for {visit.visit_id}" if physical_gate else
+                     f"Visitor Entry opened for {visit.visit_id}"),
             details=(
                 (f"Receipt printed for {visit.visit_id}. " if printed else
                  f"Receipt failed for {visit.visit_id}; operator continuation allowed. ")
-                + "Visitor Entry open is simulated: no physical command was transmitted."
+                + ("Entry controller Door 2 command queued in the background."
+                   if physical_gate else
+                   "Visitor Entry open is simulated: no physical command was transmitted.")
             ),
         )
+        if physical_gate:
+            self._queue_visitor_gate_open(visit.visit_id)
 
         if self._on_submit is not None:
             self._on_submit(visit)
         self.submitted.emit(visit)
 
         receipt_state = f"Receipt {visit.barcode} printed" if printed else "Receipt failed — check printer"
-        message = f"{visit.visit_id} submitted. {receipt_state}; Visitor Entry open is currently simulated."
+        gate_state = "Visitor Entry Door 2 opening" if physical_gate else "Visitor Entry open is currently simulated"
+        message = f"{visit.visit_id} submitted. {receipt_state}; {gate_state}."
         if gaps:
             message += "  Flagged as missing: " + ", ".join(gaps) + "."
         self.clear_form()

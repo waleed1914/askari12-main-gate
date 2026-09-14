@@ -95,6 +95,31 @@ def test_category_workflow_captures_and_submits(portal) -> None:
     assert portal.fields["visitor_name"].text() == "", "the next visitor form is ready"
 
 
+def test_submission_queues_real_visitor_entry_door_two(qapp) -> None:
+    from askari_vms.controllers import DoorCommand
+    from askari_vms.ui.pages.entry_portal import EntryPortalWindow
+
+    calls = []
+
+    class Gate:
+        def command(self, door_index, command):
+            calls.append((door_index, command))
+
+    page = EntryPortalWindow(categories=default_categories(), gate_controller=Gate())
+    try:
+        fill(page)
+        page.submit()
+        deadline = time.monotonic() + 1
+        while not calls and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        page._poll_gate_jobs()
+        assert calls == [(1, DoorCommand.OPEN)]
+        assert "barrier opened successfully" in page.status.text()
+    finally:
+        page.close()
+
+
 def test_submitting_records_the_visit_and_opens_the_gate(portal) -> None:
     fill(portal)
     portal.choose_shortcut("F1")

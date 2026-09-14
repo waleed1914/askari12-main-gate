@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from askari_vms.audit import AuditLog, AuditSeverity, sample_audit_events
 from askari_vms.auth import Session
 from askari_vms.cnic_ocr import LocalCNICReader
+from askari_vms.gate_controller import entry_gate_controller
 from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed
 from askari_vms.printing import DirectUsbPrinter
 from askari_vms.speech import OfflineDictation, default_model_path
@@ -305,6 +306,7 @@ class AdminWindow(QMainWindow):
             image_directory=self.settings.storage.data_directory,
             printer=DirectUsbPrinter(),
             dictation=OfflineDictation(default_model_path(self.settings.storage.data_directory)),
+            gate_controller=entry_gate_controller(self.settings),
         )
         portal.refresh_events()
         self.entry_portal = portal
