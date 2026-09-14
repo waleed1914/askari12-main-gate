@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 from askari_vms.controller_events import (
@@ -87,6 +87,33 @@ def test_visitor_door_two_events_are_not_recorded_as_etags(qapp):
     try:
         page._refresh_controller_event_feed()
         assert saved == []
+    finally:
+        page.close()
+
+
+def test_repeated_tag_reads_become_one_passage_with_latest_time(qapp):
+    saved = []
+    first = datetime(2026, 9, 14, 21, 30, 20)
+    page = EntryPortalWindow(on_etag_event=saved.append)
+    try:
+        page._record_controller_reading(ControllerReading(80, first, "77076", 1))
+        page._record_controller_reading(ControllerReading(81, first + timedelta(seconds=4), "77076", 1))
+        assert len(page._events) == 1
+        assert page._events[0].event_id == "ETL-entry-80"
+        assert page._events[0].timestamp == first + timedelta(seconds=4)
+        assert saved[-1].event_id == "ETL-entry-80", "the database replaces one stable passage row"
+        assert len([event for event in page._audit.events() if event.severity.value == "Critical"]) == 1
+    finally:
+        page.close()
+
+
+def test_same_tag_after_repeat_window_is_a_new_passage(qapp):
+    first = datetime(2026, 9, 14, 21, 30, 20)
+    page = EntryPortalWindow()
+    try:
+        page._record_controller_reading(ControllerReading(80, first, "77076", 1))
+        page._record_controller_reading(ControllerReading(99, first + timedelta(seconds=31), "77076", 1))
+        assert len(page._events) == 2
     finally:
         page.close()
 

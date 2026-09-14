@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -92,6 +93,7 @@ CAPTURE_LABELS = {
 }
 EVENT_COLUMNS = ("Type", "Etag", "Owner Name", "Car Number", "Time", "Expiry Date", "Status")
 EVENT_WEIGHTS = (8, 14, 20, 15, 20, 14, 9)
+ETAG_REPEAT_WINDOW_SECONDS = 30
 
 
 class _CNICCaptureWorker(QObject):
@@ -1195,9 +1197,27 @@ class EntryPortalWindow(QWidget):
         if any(item.event_id == event_id for item in self._events):
             return None
         note = " — ".join(part for part in (reading.event, reading.note) if part)
+        tag = reading.card.strip()
+        repeated_index = next((
+            index for index, prior in enumerate(self._events)
+            if prior.rfid == tag
+            and prior.door == "E-tag Entry"
+            and prior.direction == IN
+            and 0 <= (reading.timestamp - prior.timestamp).total_seconds() <= ETAG_REPEAT_WINDOW_SECONDS
+        ), None)
+        if repeated_index is not None:
+            # The long-range reader reports the same car several times while it
+            # crosses its field. Keep one passage, but show its latest read time.
+            prior = self._events.pop(repeated_index)
+            merged = replace(prior, timestamp=reading.timestamp, note=note or prior.note)
+            self._events.insert(0, merged)
+            if self._on_etag_event is not None:
+                self._on_etag_event(merged)  # repository replaces the same event id
+            self.refresh_events()
+            return merged
         event = build_event(
             event_id, reading.timestamp, "Entry Controller", "E-tag Entry", IN,
-            reading.card, self._etags, note=note,
+            tag, self._etags, note=note,
         )
         self._events.insert(0, event)
         if self._on_etag_event is not None:

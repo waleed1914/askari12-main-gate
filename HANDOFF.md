@@ -31,7 +31,9 @@ files, runtime databases or captured images to Git.
   deduplication, Door 1 filtering, SQLite persistence, registry classification and
   CRITICAL unknown-card audits. The physical firmware's JSON-inside-XML response was
   captured and added as a parser regression fixture.
-- Test baseline at this handoff: `299 passed`.
+- Repeated reads of one Entry tag within 30 seconds collapse into one passage with the
+  latest timestamp, one database row and one unknown-tag audit alert.
+- Test baseline at this handoff: `301 passed`.
 
 The Entry controller credential must be added as a Windows **Generic Credential** for
 the same Windows account that runs the application:
