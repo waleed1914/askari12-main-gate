@@ -6,7 +6,7 @@ from askari_vms.controller_events import (
     ControllerReading,
     parse_event_xml,
 )
-from askari_vms.etag_events import ETagEventKind
+from askari_vms.etag_events import ETagEvent, ETagEventKind, IN
 from askari_vms.ui.pages.entry_portal import EntryPortalWindow
 
 
@@ -142,3 +142,30 @@ def test_feed_advances_id_and_does_not_repeat():
         assert 42 in client.requested
     finally:
         feed.stop()
+
+
+def test_admin_etag_logs_accept_and_refresh_one_live_passage(qapp, tmp_path):
+    from askari_vms.storage import Store
+    from askari_vms.ui.admin_window import AdminWindow
+
+    store = Store(tmp_path / "live.sqlite3")
+    window = AdminWindow(store)
+    try:
+        event = ETagEvent(
+            "ETL-entry-89", datetime(2026, 9, 14, 21, 25, 30),
+            "Entry Controller", "E-tag Entry", IN, "77076", ETagEventKind.UNKNOWN,
+        )
+        window._etag_event_received(event)
+        assert window.etag_logs_page.events()[0] == event
+        assert store.etag_events.list()[0] == event
+
+        latest = ETagEvent(
+            event.event_id, event.timestamp + timedelta(seconds=3), event.controller_name,
+            event.door, event.direction, event.rfid, event.kind,
+        )
+        window._etag_event_received(latest)
+        assert sum(item.event_id == event.event_id for item in window.etag_logs_page.events()) == 1
+        assert window.etag_logs_page.events()[0].timestamp == latest.timestamp
+    finally:
+        window.close()
+        store.close()

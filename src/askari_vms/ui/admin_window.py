@@ -299,7 +299,7 @@ class AdminWindow(QMainWindow):
             events=self.store.etag_events.list(),
             etags=self.store.etags.list(),
             controller_event_feed=entry_event_feed(self.settings),
-            on_etag_event=self.store.etag_events.append,
+            on_etag_event=self._etag_event_received,
             cnic_reader=LocalCNICReader(
                 self.settings.peripherals.id_card_camera_index,
                 self.settings.storage.data_directory,
@@ -332,6 +332,14 @@ class AdminWindow(QMainWindow):
     def _visit_submitted(self, visit) -> None:
         self.store.visits.save(visit)
         # The dashboard is the live picture of the gate, so it must not go stale.
+        self.dashboard_page.set_data(
+            self.store.visits.list(), self.store.etags.list(), self.store.etag_events.list()
+        )
+
+    def _etag_event_received(self, event) -> None:
+        """Keep persistence, E-Tag Logs and Dashboard in sync with the Entry feed."""
+        self.store.etag_events.append(event)
+        self.etag_logs_page.accept_event(event, persist=False)
         self.dashboard_page.set_data(
             self.store.visits.list(), self.store.etags.list(), self.store.etag_events.list()
         )

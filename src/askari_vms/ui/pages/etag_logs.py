@@ -209,6 +209,21 @@ class ETagLogsPage(QWidget):
     def events(self) -> tuple[ETagEvent, ...]:
         return tuple(self._events)
 
+    def accept_event(self, event: ETagEvent, persist: bool = True) -> None:
+        """Insert or refresh one live event without rebuilding the page.
+
+        Repeated long-range reads retain one stable event ID, so replacing by ID
+        also moves that passage to the newest timestamp at the top of the table.
+        """
+        existing = next((index for index, item in enumerate(self._events)
+                         if item.event_id == event.event_id), None)
+        if existing is not None:
+            self._events.pop(existing)
+        self._events.insert(0, event)
+        if persist and self._repository is not None:
+            self._repository.append(event)
+        self.refresh()
+
     # ---------- display ----------
 
     # ---------- layout ----------

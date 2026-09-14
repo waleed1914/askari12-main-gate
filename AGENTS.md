@@ -274,6 +274,9 @@ The long-range field can report the same tag repeatedly while one vehicle passes
 Readings for the same tag, e-tag door and direction within 30 seconds are one passage:
 the single stored/displayed row moves to the latest read time and an unknown tag raises
 only one CRITICAL audit alert. The same tag after 30 seconds is a new passage.
+When the Entry portal is opened from Admin, its event callback updates SQLite, the
+already-open E-Tag Logs page and Dashboard data together; E-Tag Logs must never require
+an application restart or page reconstruction to show a new controller read.
 
 **Card management** — one card per numbered slot:
 
