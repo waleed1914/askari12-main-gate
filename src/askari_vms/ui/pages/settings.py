@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from askari_vms.audit import AuditLog
+from askari_vms.controllers import default_controllers
 from askari_vms.settings import (
     CAMERA_LANES,
     MAXIMUM_PURGE_PERCENT,
@@ -142,7 +143,7 @@ class SettingsPage(QScrollArea):
     def _controllers_card(self) -> QFrame:
         card, grid = self._card(
             "Door controllers",
-            "Two two-door controllers. Door 1 is the visitor lane and Door 2 the e-tag lane on each. "
+            "Two two-door controllers. Physical door assignments are shown below. "
             "Credentials are sent over plain HTTP, so keep controllers on an isolated LAN.",
         )
         row = 2
@@ -155,7 +156,7 @@ class SettingsPage(QScrollArea):
             grid.addWidget(status, row, 3, alignment=Qt.AlignmentFlag.AlignRight)
 
             fields = {
-                "ip_address": self._line("192.168.0.90"),
+                "ip_address": self._line("192.168.1.10"),
                 "port": self._port(),
                 "username": self._line("admin"),
                 "password": self._line("Stored in Windows Credential Manager"),
@@ -166,7 +167,10 @@ class SettingsPage(QScrollArea):
             self._field(grid, row + 1, 2, "Username", fields["username"])
             self._field(grid, row + 1, 3, "Password", fields["password"])
 
-            doors = QLabel(f"Door 1: Visitor  •  Door 2: E-Tag  —  {controller.name.split()[0]} side")
+            mapped = next(item for item in default_controllers() if item.key == controller.key)
+            doors = QLabel(
+                f"Door 1: {mapped.doors[0].name}  •  Door 2: {mapped.doors[1].name}"
+            )
             doors.setProperty("muted", "true")
             grid.addWidget(doors, row + 2, 0, 1, 3)
             test = QPushButton("Test connection")

@@ -140,7 +140,7 @@ def test_gate_commands_reach_the_shared_audit_log(qapp) -> None:
     doors = DoorControlsPage(log)
     audit_page = AuditLogsPage(log)
 
-    doors.issue_command(0, 0, DoorCommand.OPEN)
+    doors.issue_command(0, 1, DoorCommand.OPEN)
 
     events = log.events()
     assert len(events) == 1
@@ -463,7 +463,7 @@ def test_allowed_controllers_follow_the_configured_controllers(qapp) -> None:
     page = _etags_page(controller_choices(settings))
     page.open_add_dialog()
     labels = [cb.text() for cb in page.stack.currentWidget()._controller_checks.values()]
-    assert "192.168.0.90" in labels[0], "a configured controller should show its address"
+    assert "192.168.1.10" in labels[0], "a configured controller should show its address"
     assert "E-tag Entry" in labels[0], "the picker must name the e-tag door, not the visitor door"
     assert "not configured" in labels[1]
     page._show_list()

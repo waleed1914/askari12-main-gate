@@ -23,6 +23,9 @@ files, runtime databases or captured images to Git.
   `0416`, PID `5011`; no unsigned manufacturer driver is required.
 - Random eight-character CODE39 receipt tokens were printed and read successfully.
 - Physical gate opening is still simulated.
+- Entry controller `192.168.1.10`: Door 1 is E-tag Entry; Door 2 is Visitor Entry.
+  Exit controller wiring remains Visitor Exit on Door 1 and E-tag Exit on Door 2 until
+  physically reconfirmed.
 - Test baseline at this handoff: `289 passed`.
 
 ## Set up another Windows PC

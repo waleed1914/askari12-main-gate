@@ -97,7 +97,7 @@ def default_settings() -> AppSettings:
     """Seeded from the surveyed hardware. Only the Entry controller is known so far."""
     return AppSettings(
         controllers=(
-            ControllerSettings("entry", "Entry Controller", "192.168.0.90", 80, "admin", True),
+            ControllerSettings("entry", "Entry Controller", "192.168.1.10", 80, "admin", True),
             ControllerSettings("exit", "Exit Controller"),
         ),
         cameras=(
@@ -196,10 +196,10 @@ def with_camera(settings: AppSettings, updated: CameraSettings) -> AppSettings:
 
 
 def etag_door_name(key: str) -> str:
-    """Door 2 is always the e-tag lane on both controllers."""
+    """Return the physical e-tag door for this controller's confirmed wiring."""
     for controller in default_controllers():
         if controller.key == key:
-            return controller.doors[1].name
+            return next((door.name for door in controller.doors if door.lane_type == "E-Tag"), "E-Tag door")
     return "E-Tag door"
 
 

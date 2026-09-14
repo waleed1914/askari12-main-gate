@@ -39,7 +39,7 @@ SELECT_VEHICLE_TYPE = "Select Vehicle Type"
 PLACEHOLDER_CHOICES = frozenset({SELECT_GENDER, SELECT_VEHICLE_TYPE})
 
 CONTROLLERS = (
-    ("entry", "Entry Controller — E-tag Entry (Door 2)"),
+    ("entry", "Entry Controller — E-tag Entry (Door 1)"),
     ("exit", "Exit Controller — E-tag Exit (Door 2)"),
 )
 

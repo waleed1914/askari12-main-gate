@@ -100,11 +100,12 @@ the shape to follow: the page never talks to a controller, it is handed a readin
 
 | Controller | Door 1 | Door 2 |
 |---|---|---|
-| **Entry** | Visitor Entry | E-tag Entry |
+| **Entry** | E-tag Entry | Visitor Entry |
 | **Exit** | Visitor Exit | E-tag Exit |
 
-These four names are exact and confirmed. Known unit: `192.168.0.90` (the second is
-not yet configured). Board also exposes fire alarm, Exit1/2 buttons, Sensor1/2,
+These four names are exact and confirmed. Entry unit: `192.168.1.10` (the second is
+not yet configured). The Entry door order was physically confirmed on 2026-09-14 and
+supersedes the earlier reversed assumption. Board also exposes fire alarm, Exit1/2 buttons, Sensor1/2,
 tamper and reset inputs, an RS-485 long-range reader, and MQTT.
 
 ### Cameras — visitor lanes only
@@ -228,7 +229,8 @@ they log into*, never by their account.
 
 ## 3. Controller HTTP protocol
 
-Reverse-engineered from `192.168.0.90`. Plain HTTP + **HTTP Basic Auth** — credentials
+Originally reverse-engineered from `192.168.0.90`; the current Entry unit is
+`192.168.1.10`. Plain HTTP + **HTTP Basic Auth** — credentials
 are sent unencrypted, so keep controllers on an isolated LAN and store the password in
 the OS credential store, never in this repo.
 
@@ -387,7 +389,7 @@ get copied into the data folder when persistence lands.
 The Add/Edit E-Tag form carries exactly the reference system's 21 fields — verified
 field-by-field, with a test in `tests/test_ui_regressions.py` pinning the set. Allowed
 Controllers is built from the configured controllers via `settings.controller_choices()`,
-so each row shows its address and e-tag door (`Entry Controller — 192.168.0.90 (E-tag
+so each row shows its address and e-tag door (`Entry Controller — 192.168.1.10 (E-tag
 Entry)`) and follows whatever Settings holds. Saving Settings updates the picker.
 
 One resident may hold **multiple e-tags** — personal details may repeat across them,

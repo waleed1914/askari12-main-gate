@@ -3,10 +3,10 @@ from askari_vms.controllers import DoorCommand, DoorState, apply_simulated_comma
 
 def test_default_door_mapping_is_exact() -> None:
     entry, exit_controller = default_controllers()
-    assert tuple(door.name for door in entry.doors) == ("Visitor Entry", "E-tag Entry")
+    assert tuple(door.name for door in entry.doors) == ("E-tag Entry", "Visitor Entry")
     assert tuple(door.name for door in exit_controller.doors) == ("Visitor Exit", "E-tag Exit")
-    assert all(controller.doors[0].lane_type == "Visitor" for controller in (entry, exit_controller))
-    assert all(controller.doors[1].lane_type == "E-Tag" for controller in (entry, exit_controller))
+    assert entry.doors[0].lane_type == "E-Tag" and entry.doors[1].lane_type == "Visitor"
+    assert exit_controller.doors[0].lane_type == "Visitor" and exit_controller.doors[1].lane_type == "E-Tag"
 
 
 def test_simulated_commands_update_door_state() -> None:

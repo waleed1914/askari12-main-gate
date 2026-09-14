@@ -23,7 +23,7 @@ from askari_vms.settings import (
 def test_defaults_match_the_surveyed_hardware() -> None:
     settings = default_settings()
     entry, exit_controller = settings.controllers
-    assert entry.ip_address == "192.168.0.90"
+    assert entry.ip_address == "192.168.1.10"
     assert entry.configured and not exit_controller.configured
     assert describe_controller(exit_controller) == "Not configured"
 
@@ -59,7 +59,7 @@ def test_unconfigured_controller_is_allowed_but_a_bad_address_is_not() -> None:
 
 def test_two_devices_cannot_share_an_address() -> None:
     settings = default_settings()
-    clash = with_camera(settings, replace(settings.cameras[0], ip_address="192.168.0.90"))
+    clash = with_camera(settings, replace(settings.cameras[0], ip_address="192.168.1.10"))
     errors = validate_settings(clash)
     assert any("used by both" in message for message in errors.values())
 
