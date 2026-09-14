@@ -1,7 +1,9 @@
 from datetime import date, datetime, timedelta
 
 from askari_vms.audit import AuditSeverity
-from askari_vms.etag_events import IN, ETagEventKind, build_event, classify, days_until_expiry
+from askari_vms.etag_events import (
+    IN, ETagEventKind, build_event, classify, collapse_repeated_passages, days_until_expiry,
+)
 from askari_vms.etags import ETagRecord
 
 
@@ -71,3 +73,16 @@ def test_days_until_expiry() -> None:
     today = date(2026, 9, 2)
     assert days_until_expiry(make_record("1", expiry_date=date(2026, 9, 12)), today) == 10
     assert days_until_expiry(make_record("1", expiry_date=date(2026, 9, 1)), today) == -1
+
+
+def test_loaded_reader_noise_collapses_to_latest_passage() -> None:
+    record = make_record("77076")
+    latest = datetime(2026, 9, 14, 21, 40, 0)
+    events = [
+        build_event("E3", latest, "Entry Controller", "E-tag Entry", IN, "77076", [record]),
+        build_event("E2", latest - timedelta(seconds=220), "Entry Controller", "E-tag Entry", IN, "77076", [record]),
+        build_event("E1", latest - timedelta(seconds=400), "Entry Controller", "E-tag Entry", IN, "77076", [record]),
+    ]
+    collapsed = collapse_repeated_passages(events)
+    assert [item.event_id for item in collapsed] == ["E3"]
+    assert collapsed[0].timestamp == latest

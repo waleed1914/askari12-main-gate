@@ -10,6 +10,7 @@ from askari_vms.etags import ETagRecord, ETagState, expiry_state
 
 IN = "In"
 OUT = "Out"
+REPEAT_PASSAGE_SECONDS = 300
 
 
 class ETagEventKind(StrEnum):
@@ -109,3 +110,23 @@ def history_for(events: Sequence[ETagEvent], rfids: Collection[str]) -> tuple[ET
     """Every reading for a set of tags, newest first (the feed is already ordered)."""
     wanted = {rfid.strip() for rfid in rfids}
     return tuple(event for event in events if event.rfid in wanted)
+
+
+def collapse_repeated_passages(
+    events: Sequence[ETagEvent], window_seconds: int = REPEAT_PASSAGE_SECONDS,
+) -> list[ETagEvent]:
+    """Keep the latest row from each continuous long-range-reader burst.
+
+    Input is newest first. A chain of reads remains one passage while every gap is
+    within the window; the same tag after a longer quiet period becomes a new visit.
+    """
+    kept: list[ETagEvent] = []
+    last_seen: dict[tuple[str, str, str], datetime] = {}
+    for event in events:
+        key = (event.rfid, event.door, event.direction)
+        newer = last_seen.get(key)
+        last_seen[key] = event.timestamp
+        if newer is not None and 0 <= (newer - event.timestamp).total_seconds() <= window_seconds:
+            continue
+        kept.append(event)
+    return kept

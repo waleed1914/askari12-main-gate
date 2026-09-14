@@ -35,7 +35,9 @@ from askari_vms.ui.brand import circular_logo
 from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
 from askari_vms.controller_events import ControllerEventFeed, ControllerReading
-from askari_vms.etag_events import ETagEvent, IN, build_event
+from askari_vms.etag_events import (
+    ETagEvent, IN, REPEAT_PASSAGE_SECONDS, build_event, collapse_repeated_passages,
+)
 from askari_vms.etags import ETagRecord
 from askari_vms.gate_controller import GateController
 from askari_vms.controllers import DoorCommand
@@ -93,7 +95,6 @@ CAPTURE_LABELS = {
 }
 EVENT_COLUMNS = ("Type", "Etag", "Owner Name", "Car Number", "Time", "Expiry Date", "Status")
 EVENT_WEIGHTS = (8, 14, 20, 15, 20, 14, 9)
-ETAG_REPEAT_WINDOW_SECONDS = 30
 
 
 class _CNICCaptureWorker(QObject):
@@ -243,7 +244,7 @@ class EntryPortalWindow(QWidget):
         self._visits = list(visits or [])
         self._session = session
         self._on_submit = on_submit
-        self._events = list(events or [])
+        self._events = collapse_repeated_passages(list(events or []))
         self._etags = list(etags or [])
         self._controller_event_feed = controller_event_feed
         self._on_etag_event = on_etag_event
@@ -1203,7 +1204,7 @@ class EntryPortalWindow(QWidget):
             if prior.rfid == tag
             and prior.door == "E-tag Entry"
             and prior.direction == IN
-            and 0 <= (reading.timestamp - prior.timestamp).total_seconds() <= ETAG_REPEAT_WINDOW_SECONDS
+            and 0 <= (reading.timestamp - prior.timestamp).total_seconds() <= REPEAT_PASSAGE_SECONDS
         ), None)
         if repeated_index is not None:
             # The long-range reader reports the same car several times while it

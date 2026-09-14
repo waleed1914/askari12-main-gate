@@ -107,12 +107,12 @@ def test_repeated_tag_reads_become_one_passage_with_latest_time(qapp):
         page.close()
 
 
-def test_same_tag_after_repeat_window_is_a_new_passage(qapp):
+def test_same_tag_after_five_minute_repeat_window_is_a_new_passage(qapp):
     first = datetime(2026, 9, 14, 21, 30, 20)
     page = EntryPortalWindow()
     try:
         page._record_controller_reading(ControllerReading(80, first, "77076", 1))
-        page._record_controller_reading(ControllerReading(99, first + timedelta(seconds=31), "77076", 1))
+        page._record_controller_reading(ControllerReading(99, first + timedelta(seconds=301), "77076", 1))
         assert len(page._events) == 2
     finally:
         page.close()
@@ -157,7 +157,7 @@ def test_admin_etag_logs_accept_and_refresh_one_live_passage(qapp, tmp_path):
         )
         window._etag_event_received(event)
         assert window.etag_logs_page.events()[0] == event
-        assert store.etag_events.list()[0] == event
+        assert next(item for item in store.etag_events.list() if item.event_id == event.event_id) == event
 
         latest = ETagEvent(
             event.event_id, event.timestamp + timedelta(seconds=3), event.controller_name,

@@ -10,7 +10,9 @@ from PySide6.QtWidgets import (
 )
 
 from askari_vms.audit import AuditLog
-from askari_vms.etag_events import IN, OUT, ETagEvent, ETagEventKind, build_event, history_for
+from askari_vms.etag_events import (
+    IN, OUT, ETagEvent, ETagEventKind, build_event, collapse_repeated_passages, history_for,
+)
 from askari_vms.etags import ETagRecord, tags_for_resident
 from askari_vms.ui.event_styles import DEFAULT_TEXT, LEGEND, ROW_COLOURS, TEXT_COLOURS
 from askari_vms.ui.pagination import Pager
@@ -34,7 +36,8 @@ class ETagLogsPage(QWidget):
         self._audit = audit_log if audit_log is not None else AuditLog()
         self._repository = repository
         self._records = records if records is not None else []
-        self._events: list[ETagEvent] = list(repository.list()) if repository is not None else []
+        loaded = list(repository.list()) if repository is not None else []
+        self._events: list[ETagEvent] = collapse_repeated_passages(loaded)
         self._visible: list[ETagEvent] = []
         self._sequence = 0
         self._build()
