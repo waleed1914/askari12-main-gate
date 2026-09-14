@@ -27,7 +27,10 @@ files, runtime databases or captured images to Git.
 - Entry controller `192.168.1.10`: Door 1 is E-tag Entry; Door 2 is Visitor Entry.
   Exit controller wiring remains Visitor Exit on Door 1 and E-tag Exit on Door 2 until
   physically reconfirmed.
-- Test baseline at this handoff: `293 passed`.
+- Entry `GEvent.xml` polling is integrated at 500 ms with reconnect, event-ID
+  deduplication, Door 1 filtering, SQLite persistence, registry classification and
+  CRITICAL unknown-card audits. The first physical payload still needs checking.
+- Test baseline at this handoff: `298 passed`.
 
 The Entry controller credential must be added as a Windows **Generic Credential** for
 the same Windows account that runs the application:

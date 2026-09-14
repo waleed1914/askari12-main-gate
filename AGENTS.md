@@ -259,8 +259,13 @@ GET /GEvent.xml?ID={last_event_id}
 ```
 
 Carries card/tag, reader direction, door, event text and controller status — this is
-the long-range reader feed. **Still to verify on real hardware:** that rejected and
-unknown tags also appear here (we need them for the critical "unknown tag" event).
+the long-range reader feed. The controller UI and browser network log confirmed on
+2026-09-14 that rejected reads appear as `Invalid card` and `GEvent.xml?ID=<last>`
+returns HTTP 200. `controller_events.py` polls at 500 ms outside Qt, reconnects with
+backoff, deduplicates by controller event ID and shares the controller's Windows
+credential. Entry accepts only physical Door 1 as E-tag Entry; Door 2 card activity is
+not misclassified as an e-tag. Readings are classified against the local registry,
+persisted, shown live, and unknown cards raise a CRITICAL audit event.
 
 **Card management** — one card per numbered slot:
 
@@ -491,7 +496,8 @@ Audit events now carry the signed-in operator and workstation. The `system` /
 
 - Receipt printing is proven on paper. The earlier blank slips were caused by reversed
   thermal paper, not the ESC/POS payload or printer adapter.
-- Confirm `/GEvent.xml` reports rejected and unknown tags, on real hardware.
+- Confirm the exact field layout of the first live `/GEvent.xml` payload on the Entry
+  PC; the parser accepts single-event and wrapped-event XML layouts.
 - Second controller's IP is unassigned.
 - Entry driver camera confirmed by the user on 2026-09-09: `http://192.168.1.16/`.
   This supersedes the earlier ConfigTool scan address `.14` for Visitor Entry.

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from askari_vms.audit import AuditLog, AuditSeverity, sample_audit_events
 from askari_vms.auth import Session
 from askari_vms.cnic_ocr import LocalCNICReader
+from askari_vms.controller_events import entry_event_feed
 from askari_vms.gate_controller import entry_gate_controller
 from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed
 from askari_vms.printing import DirectUsbPrinter
@@ -296,6 +297,9 @@ class AdminWindow(QMainWindow):
             session=self.session,
             on_submit=self._visit_submitted,
             events=self.store.etag_events.list(),
+            etags=self.store.etags.list(),
+            controller_event_feed=entry_event_feed(self.settings),
+            on_etag_event=self.store.etag_events.append,
             cnic_reader=LocalCNICReader(
                 self.settings.peripherals.id_card_camera_index,
                 self.settings.storage.data_directory,

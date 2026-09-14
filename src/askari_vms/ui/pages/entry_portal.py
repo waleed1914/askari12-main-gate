@@ -33,7 +33,9 @@ from askari_vms.camera_link import NO_DEVICE, UNPLUGGED, CameraLink, LinkState
 from askari_vms.ui.brand import circular_logo
 from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
-from askari_vms.etag_events import ETagEvent
+from askari_vms.controller_events import ControllerEventFeed, ControllerReading
+from askari_vms.etag_events import ETagEvent, IN, build_event
+from askari_vms.etags import ETagRecord
 from askari_vms.gate_controller import GateController
 from askari_vms.controllers import DoorCommand
 from askari_vms.ip_camera import SnapshotFeed
@@ -229,6 +231,9 @@ class EntryPortalWindow(QWidget):
         printer: ReceiptPrinter | None = None,
         dictation: OfflineDictation | None = None,
         gate_controller: GateController | None = None,
+        etags: Sequence[ETagRecord] | None = None,
+        controller_event_feed: ControllerEventFeed | None = None,
+        on_etag_event: Callable[[ETagEvent], None] | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -237,6 +242,11 @@ class EntryPortalWindow(QWidget):
         self._session = session
         self._on_submit = on_submit
         self._events = list(events or [])
+        self._etags = list(etags or [])
+        self._controller_event_feed = controller_event_feed
+        self._on_etag_event = on_etag_event
+        self._controller_event_timer: QTimer | None = None
+        self._controller_event_connected: bool | None = None
         self._gate = gate
         self._cnic_reader = cnic_reader
         self._driver_camera = driver_camera
@@ -317,6 +327,11 @@ class EntryPortalWindow(QWidget):
             self._anpr_timer = QTimer(self)
             self._anpr_timer.timeout.connect(self._refresh_anpr)
             self._anpr_timer.start(200)
+        if self._controller_event_feed is not None:
+            self._controller_event_feed.start()
+            self._controller_event_timer = QTimer(self)
+            self._controller_event_timer.timeout.connect(self._refresh_controller_event_feed)
+            self._controller_event_timer.start(250)
 
     def read_plate(self, plate: str) -> bool:
         """Adapter entry point: fill only the plate; leave confirmation to the operator."""
@@ -624,9 +639,17 @@ class EntryPortalWindow(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 10, 14, 12)
         layout.setSpacing(8)
+        heading_row = QHBoxLayout()
         heading = QLabel("Live controller events")
         heading.setProperty("section", "true")
-        layout.addWidget(heading)
+        heading_row.addWidget(heading)
+        heading_row.addStretch()
+        self.events_status = QLabel(
+            "Connecting…" if self._controller_event_feed is not None else "Controller feed not enabled"
+        )
+        self.events_status.setProperty("muted", "true")
+        heading_row.addWidget(self.events_status)
+        layout.addLayout(heading_row)
 
         self.events_table = QTableWidget(0, len(EVENT_COLUMNS))
         self.events_table.setHorizontalHeaderLabels(EVENT_COLUMNS)
@@ -1148,6 +1171,48 @@ class EntryPortalWindow(QWidget):
         self.events_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._event_columns.apply()
 
+    def _refresh_controller_event_feed(self) -> None:
+        readings, (connected, message) = self._controller_event_feed.drain()
+        self.events_status.setText(message)
+        if connected != self._controller_event_connected:
+            if connected or self._controller_event_connected is not None:
+                self._audit.record(
+                    action="Hardware event", target="Entry Controller event feed",
+                    summary="E-tag event feed connected" if connected else "E-tag event feed unavailable",
+                    details="GEvent.xml polling. Visitor and manual workflows remain available.",
+                    severity=AuditSeverity.INFO if connected else AuditSeverity.WARNING,
+                )
+            self._controller_event_connected = connected
+        for reading in readings:
+            self._record_controller_reading(reading)
+
+    def _record_controller_reading(self, reading: ControllerReading) -> ETagEvent | None:
+        # The controller reports physical doors as 1/2. Only Entry Door 1 is the
+        # autonomous e-tag lane; Door 2 visitor activity belongs to VMS.
+        if reading.door != 1 or not reading.card:
+            return None
+        event_id = f"ETL-entry-{reading.event_id}"
+        if any(item.event_id == event_id for item in self._events):
+            return None
+        note = " — ".join(part for part in (reading.event, reading.note) if part)
+        event = build_event(
+            event_id, reading.timestamp, "Entry Controller", "E-tag Entry", IN,
+            reading.card, self._etags, note=note,
+        )
+        self._events.insert(0, event)
+        if self._on_etag_event is not None:
+            self._on_etag_event(event)
+        if event.is_critical:
+            self._audit.record(
+                action="Hardware event", target="E-tag Entry",
+                summary=f"Unknown e-tag {event.rfid} read at E-tag Entry",
+                details=(f"Entry Controller reported RFID {event.rfid}. Controller event: "
+                         f"{note or 'no description'}. Check card programming."),
+                severity=AuditSeverity.CRITICAL, operator="SYSTEM", timestamp=event.timestamp,
+            )
+        self.refresh_events()
+        return event
+
     # ---------- submit ----------
 
     def clear_form(self) -> None:
@@ -1185,6 +1250,10 @@ class EntryPortalWindow(QWidget):
         self.fields["destination"].setFocus()
 
     def closeEvent(self, event) -> None:
+        if self._controller_event_timer is not None:
+            self._controller_event_timer.stop()
+        if self._controller_event_feed is not None:
+            self._controller_event_feed.stop()
         if self._anpr_timer is not None:
             self._anpr_timer.stop()
         if self._anpr_feed is not None:
