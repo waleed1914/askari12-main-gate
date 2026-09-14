@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import datetime
+import json
+import re
 from threading import Event, Lock, Thread
 import urllib.error
 import urllib.parse
@@ -44,7 +46,7 @@ def _timestamp(value: str) -> datetime:
 
 
 def parse_event_xml(payload: bytes) -> list[ControllerReading]:
-    """Parse either one GEvent record or a wrapper containing several records."""
+    """Parse XML fields or the controller's JSON object wrapped in ``<response>``."""
     try:
         text = payload.decode("utf-8", errors="replace").lstrip("\ufeff\x00 \r\n\t")
         root = ET.fromstring(text)
@@ -57,6 +59,18 @@ def parse_event_xml(payload: bytes) -> list[ControllerReading]:
             child.tag.rsplit("}", 1)[-1].casefold(): (child.text or "").strip()
             for child in list(node)
         }
+        if "id" in fields and ("card" in fields or "door" in fields):
+            candidates.append(fields)
+
+    # Firmware V5 wraps its live record as JSON text after a ``#GEvent`` XML
+    # comment instead of representing fields as XML children.
+    embedded = "".join(root.itertext())
+    for match in re.finditer(r"\{[^{}]+\}", embedded):
+        try:
+            record = json.loads(match.group(0))
+        except (TypeError, ValueError):
+            continue
+        fields = {str(key).casefold(): str(value).strip() for key, value in record.items()}
         if "id" in fields and ("card" in fields or "door" in fields):
             candidates.append(fields)
 

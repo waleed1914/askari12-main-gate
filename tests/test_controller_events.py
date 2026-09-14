@@ -16,6 +16,11 @@ SINGLE = b"""<?xml version="1.0"?>
   <Door>1</Door><Reader>0</Reader><Event>Invalid card</Event><Note>Denied</Note>
 </Event>"""
 
+REAL_CONTROLLER = b'''<response>
+<!-- #GEvent -->
+{"ID":"89","Reader":"IN","Door":"1","Card":"77076","Name":"wahab","Note":"Entry","Time":"2026-09-14 21:25:30","SysTime":"2026-09-14 21:25:30","IsTwo":"2","OutPut":"1","InPut":"0","Lock":"0"}
+</response>'''
+
 
 def test_controller_event_xml_fields_are_parsed():
     [reading] = parse_event_xml(SINGLE)
@@ -23,6 +28,15 @@ def test_controller_event_xml_fields_are_parsed():
         42, datetime(2026, 9, 14, 20, 54, 40), "14811188", 1, 0,
         "Invalid card", "Denied",
     )
+
+
+def test_real_controller_json_inside_xml_is_parsed():
+    [reading] = parse_event_xml(REAL_CONTROLLER)
+    assert reading.event_id == 89
+    assert reading.card == "77076"
+    assert reading.door == 1
+    assert reading.timestamp == datetime(2026, 9, 14, 21, 25, 30)
+    assert reading.note == "Entry"
 
 
 def test_wrapped_events_are_parsed_and_deduplicated():
