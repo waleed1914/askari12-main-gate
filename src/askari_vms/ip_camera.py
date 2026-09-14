@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.request
 
-from askari_vms.settings import AppSettings, DRIVER, VISITOR_ENTRY
+from askari_vms.settings import ANPR, AppSettings, DRIVER, VISITOR_ENTRY
 
 MAX_IMAGE_BYTES = 10_000_000
 MAX_FRAME_AGE = 3.0
@@ -75,8 +75,9 @@ class CameraFrame:
 
 
 class SnapshotFeed:
-    def __init__(self, client: SnapshotClient) -> None:
+    def __init__(self, client: SnapshotClient, label: str = "Driver camera") -> None:
         self.client = client
+        self.label = label
         self._stop = Event()
         self._lock = Lock()
         self._frame = CameraFrame()
@@ -84,7 +85,7 @@ class SnapshotFeed:
 
     def start(self) -> None:
         if self._thread is None:
-            self._thread = Thread(target=self._run, daemon=True, name="driver-camera")
+            self._thread = Thread(target=self._run, daemon=True, name=f"{self.label.casefold().replace(' ', '-')}-snapshot")
             self._thread.start()
 
     def stop(self) -> None:
@@ -102,7 +103,7 @@ class SnapshotFeed:
             started = time.monotonic()
             try:
                 jpeg = self.client.fetch()
-                frame = CameraFrame(jpeg, time.monotonic(), "Live driver camera — refreshing snapshots")
+                frame = CameraFrame(jpeg, time.monotonic(), f"Live {self.label} — refreshing snapshots")
                 failures = 0
                 delay = max(0.0, 0.5 - (time.monotonic() - started))
             except Exception as exc:
@@ -121,4 +122,24 @@ def entry_driver_feed(settings: AppSettings) -> SnapshotFeed | None:
                    and c.ip_address and c.snapshot_path), None)
     if camera is None:
         return None
-    return SnapshotFeed(SnapshotClient(camera.key, camera.ip_address, camera.http_port, camera.snapshot_path))
+    return SnapshotFeed(
+        SnapshotClient(camera.key, camera.ip_address, camera.http_port, camera.snapshot_path),
+        "driver camera",
+    )
+
+
+def entry_anpr_snapshot_feed(settings: AppSettings) -> SnapshotFeed | None:
+    """Live overview from the ANPR assigned to Visitor Entry.
+
+    Dahua ITC cameras expose the current JPEG at this standard CGI endpoint. The
+    explicit Settings value wins when a different firmware needs another path.
+    """
+    camera = next((c for c in settings.cameras if c.role == ANPR and c.lane == VISITOR_ENTRY
+                   and c.ip_address), None)
+    if camera is None:
+        return None
+    path = camera.snapshot_path or "/cgi-bin/snapshot.cgi"
+    return SnapshotFeed(
+        SnapshotClient(camera.key, camera.ip_address, camera.http_port, path),
+        "ANPR camera",
+    )

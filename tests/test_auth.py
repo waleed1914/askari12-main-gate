@@ -99,6 +99,9 @@ def test_initial_accounts_allow_login_without_creating_gate_traffic(qapp):
         session = login.sign_in()
         assert session is not None and session.role == UserRole.OPERATOR
         assert authenticate(store.users.list(), "admin", "change-me-123")[0] is not None
+        assert [(item.name, item.shortcut) for item in store.categories.active()][:3] == [
+            ("Car", "F1"), ("Truck", "F2"), ("Motorcycle", "F3"),
+        ]
         assert store.visits.count() == store.etags.count() == store.etag_events.count() == 0
         assert store.audit.list()[0].target == "Initial user accounts"
         login.close()

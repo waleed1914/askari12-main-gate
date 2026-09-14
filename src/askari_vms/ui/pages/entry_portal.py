@@ -220,6 +220,7 @@ class EntryPortalWindow(QWidget):
         gate: str = "C1 - Entry",
         cnic_reader: CNICReader | None = None,
         driver_camera: SnapshotFeed | None = None,
+        anpr_camera: SnapshotFeed | None = None,
         image_directory: str = "",
         anpr_feed: ANPRFeed | None = None,
         printer: ReceiptPrinter | None = None,
@@ -235,6 +236,7 @@ class EntryPortalWindow(QWidget):
         self._gate = gate
         self._cnic_reader = cnic_reader
         self._driver_camera = driver_camera
+        self._anpr_camera = anpr_camera
         self._anpr_feed = anpr_feed
         self._printer = printer if printer is not None else NullPrinter()
         self._dictation = dictation
@@ -250,6 +252,9 @@ class EntryPortalWindow(QWidget):
         self._driver_displayed_at = 0.0
         self._driver_available: bool | None = None
         self._driver_timer: QTimer | None = None
+        self._anpr_camera_displayed_at = 0.0
+        self._anpr_camera_available: bool | None = None
+        self._anpr_camera_timer: QTimer | None = None
         self._selected: VehicleCategory | None = None
         self._captured: dict[str, bool] = {"cnic": False, "anpr": False, "driver": False, "plate": False}
         self._cnic_image = ""
@@ -290,6 +295,11 @@ class EntryPortalWindow(QWidget):
             self._driver_timer = QTimer(self)
             self._driver_timer.timeout.connect(self._refresh_driver)
             self._driver_timer.start(250)
+        if self._anpr_camera is not None:
+            self._anpr_camera.start()
+            self._anpr_camera_timer = QTimer(self)
+            self._anpr_camera_timer.timeout.connect(self._refresh_anpr_camera)
+            self._anpr_camera_timer.start(250)
         if self._anpr_feed is not None:
             self._anpr_feed.start()
             self._anpr_timer = QTimer(self)
@@ -313,7 +323,8 @@ class EntryPortalWindow(QWidget):
 
     def _refresh_anpr(self) -> None:
         readings, (connected, message) = self._anpr_feed.drain()
-        self._streams["anpr"].set_state(message)
+        if self._anpr_camera is None:
+            self._streams["anpr"].set_state(message)
         if connected != self._anpr_connected:
             self._audit.record(
                 action="Hardware event", target="Visitor Entry ANPR",
@@ -325,6 +336,30 @@ class EntryPortalWindow(QWidget):
         for reading in readings:
             if reading.received_at > self._anpr_after and time.monotonic() - reading.received_at <= 10:
                 self.read_plate(reading.plate)
+
+    def _refresh_anpr_camera(self) -> None:
+        frame = self._anpr_camera.latest()
+        panel = self._streams["anpr"]
+        available = frame.fresh()
+        if available and frame.received_at != self._anpr_camera_displayed_at:
+            pixmap = QPixmap()
+            available = pixmap.loadFromData(frame.jpeg, "JPG")
+            if available:
+                panel.preview.setPixmap(pixmap)
+                panel.preview.show()
+                self._anpr_camera_displayed_at = frame.received_at
+        if not available:
+            panel.clear_image()
+        panel.set_state(frame.message if available or not frame.jpeg else "ANPR camera stalled — reconnecting.")
+        if available != self._anpr_camera_available:
+            if available or self._anpr_camera_available is not None:
+                self._audit.record(
+                    action="Hardware event", target="Visitor Entry ANPR camera",
+                    summary="ANPR live view connected" if available else "ANPR live view unavailable",
+                    details="Automatic snapshot feed. Plate detection and manual entry remain available.",
+                    severity=AuditSeverity.INFO if available else AuditSeverity.WARNING,
+                )
+            self._anpr_camera_available = available
 
     def _refresh_driver(self) -> None:
         frame = self._driver_camera.latest()
@@ -463,7 +498,10 @@ class EntryPortalWindow(QWidget):
         layout.setSpacing(4)
         lines = [f"<b>{c.shortcut}</b> {c.name}" for c in self._categories]
         if lines:
-            categories = QLabel(" &nbsp; · &nbsp; ".join(lines))
+            categories = QLabel(
+                "<b>Vehicle shortcut — captures, submits &amp; prints:</b> &nbsp; "
+                + " &nbsp; · &nbsp; ".join(lines)
+            )
             categories.setObjectName("entryShortcuts")
             categories.setWordWrap(True)
             layout.addWidget(categories)
@@ -542,20 +580,21 @@ class EntryPortalWindow(QWidget):
         top.addWidget(self.capture_button)
         layout.addLayout(top)
 
-        self.cnic_panel = StreamPanel("ID card")
+        self.cnic_panel = StreamPanel("ID card — compact preview")
+        self.cnic_panel.setMaximumHeight(190)
         views = QGridLayout()
         views.setSpacing(12)
-        views.addWidget(self.cnic_panel, 0, 0)
+        views.addWidget(self.cnic_panel, 0, 0, 1, 2)
         self._streams: dict[str, StreamPanel] = {}
         for key, title in STREAMS:
-            panel = StreamPanel(title, compact=key == "anpr")
+            panel = StreamPanel(title)
             self._streams[key] = panel
-        views.addWidget(self._streams["driver"], 0, 1)
-        views.addWidget(self._streams["anpr"], 1, 0, 1, 2)
+        views.addWidget(self._streams["driver"], 1, 0)
+        views.addWidget(self._streams["anpr"], 1, 1)
         views.setColumnStretch(0, 1)
         views.setColumnStretch(1, 1)
-        views.setRowStretch(0, 4)
-        views.setRowStretch(1, 0)
+        views.setRowStretch(0, 0)
+        views.setRowStretch(1, 1)
         layout.addLayout(views, 1)
 
         self.choose_button = QPushButton("Choose ID card image…")
@@ -992,9 +1031,14 @@ class EntryPortalWindow(QWidget):
     def refresh_cameras(self) -> None:
         if self._anpr_feed is not None:
             self._refresh_anpr()
+        if self._anpr_camera is not None:
+            self._refresh_anpr_camera()
         if self._driver_camera is not None:
             self._refresh_driver()
-            self.status.setText("Driver preview refreshed. Unavailable cameras reconnect automatically.")
+            self.status.setText("ANPR and driver previews refreshed. Unavailable cameras reconnect automatically.")
+            return
+        if self._anpr_camera is not None:
+            self.status.setText("ANPR preview refreshed. Unavailable cameras reconnect automatically.")
             return
         if self._anpr_feed is not None:
             self.status.setText("ANPR status refreshed. Disconnections reconnect automatically.")
@@ -1134,6 +1178,8 @@ class EntryPortalWindow(QWidget):
             self._driver_timer.stop()
         if self._driver_camera is not None:
             self._driver_camera.stop()
+        if self._anpr_camera is not None:
+            self._anpr_camera.stop()
         # Stop the watchdog first, or it reopens the camera we are shutting down.
         if self._camera_timer is not None:
             self._camera_timer.stop()

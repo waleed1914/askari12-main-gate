@@ -11,16 +11,19 @@ files, runtime databases or captured images to Git.
 ## Current verified state
 
 - Entry ANPR autofill is connected through the Dahua event subscription adapter.
+- Entry ANPR has a large authenticated live snapshot view using `/cgi-bin/snapshot.cgi`.
 - Entry driver snapshot preview and evidence saving are integrated.
 - USB CNIC-camera preview, reconnect watchdog, capture and offline OCR are integrated.
 - Holding Ctrl+D records from `Microphone (USB Microphone)` and performs offline English
   destination dictation. Spoken numbers are converted to digits.
 - A vehicle-category F1-F12 key starts the final Entry capture/OCR/submit/print workflow.
+- Fresh production databases seed default F1-F6 vehicle categories without demo traffic;
+  schema v5 repairs already-created fresh installations once.
 - SONIC SNC-830 printing was physically verified through direct USB ESC/POS using VID
   `0416`, PID `5011`; no unsigned manufacturer driver is required.
 - Random eight-character CODE39 receipt tokens were printed and read successfully.
 - Physical gate opening is still simulated.
-- Test baseline at this handoff: `287 passed`.
+- Test baseline at this handoff: `289 passed`.
 
 ## Set up another Windows PC
 

@@ -3,7 +3,10 @@ import time
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QImage
 
-from askari_vms.ip_camera import CameraError, CameraFrame, SnapshotClient, SnapshotFeed
+from askari_vms.ip_camera import (
+    CameraError, CameraFrame, SnapshotClient, SnapshotFeed, entry_anpr_snapshot_feed,
+)
+from askari_vms.settings import default_settings
 from askari_vms.storage import Store
 from askari_vms.ui.pages.entry_portal import EntryPortalWindow
 from askari_vms.ui.pages.exit_portal import ExitPortalWindow
@@ -32,6 +35,26 @@ class FakeFeed:
 
     def latest(self):
         return self.frame
+
+
+def test_entry_anpr_live_view_uses_assigned_camera_and_dahua_snapshot_path():
+    feed = entry_anpr_snapshot_feed(default_settings())
+    assert feed is not None
+    assert feed.client.key == "anpr_exit"  # durable key; .13 is assigned to Entry
+    assert feed.client.url == "http://192.168.1.13:80/cgi-bin/snapshot.cgi"
+
+
+def test_entry_portal_displays_the_anpr_live_snapshot(qapp):
+    feed = FakeFeed()
+    portal = EntryPortalWindow(anpr_camera=feed)
+    try:
+        feed.frame = CameraFrame(jpeg(), time.monotonic(), "Live ANPR camera")
+        portal._refresh_anpr_camera()
+        assert not portal._streams["anpr"].preview.pixmap().isNull()
+        assert portal.cnic_panel.maximumHeight() == 190
+    finally:
+        portal.close()
+    assert feed.stopped
 
 
 def test_capture_persists_and_next_visitor_cannot_reuse_frame(qapp, tmp_path):

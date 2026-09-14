@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -138,7 +138,7 @@ class Database:
                 self.connection.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
             else:
                 old_version = int(row["version"])
-                if old_version < 3 and self.count("categories") == 0:
+                if old_version < 5 and self.count("categories") == 0:
                     self._seed_category_migration()
                 self.connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
 
@@ -481,6 +481,12 @@ class Store:
         Never reset existing accounts or add demonstration gate traffic. Settings
         and audit rows may already exist from hardware setup before the first login.
         """
+        # A production-fresh install needs usable vehicle shortcuts but no demo
+        # traffic. Schema v5 repairs installs that were provisioned before this
+        # rule; this branch covers a brand-new database.
+        if not self.users.count() and not self.categories.count():
+            from askari_vms.categories import default_categories
+            self.categories.save_all(default_categories())
         if self.users.count():
             return False
         from askari_vms.audit import AuditLog

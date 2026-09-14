@@ -126,6 +126,12 @@ The ANPR panel currently reports detection status; plate detection does not clai
 capture an overview or cropped-plate image. Integration was checked against the
 [Dahua real-time subscription specification](https://files.dahua.support/Solutions/Access%20Control%20Solution/Integration/DAHUA%20ACCESS%20CONTROL%20PRODUCTS%20INTEGRATION%20INSTRUCTION%20Ver1.0.pdf).
 
+**Entry ANPR live view update, 2026-09-14:** `entry_anpr_snapshot_feed()` uses the
+authenticated Dahua `/cgi-bin/snapshot.cgi` endpoint on HTTP port 80 and shows a large
+refreshing overview beside the large Entry driver view. The ID-card preview is a compact
+strip above them. Detection and live-view feeds are independent, so either may recover
+without blocking the other or manual entry.
+
 **Entry driver update, 2026-09-09:** the device at `192.168.1.16` was queried directly
 and identifies as **Hikvision DS-2CD1653G0-IZS**, firmware **V5.7.20**. It replaces the
 earlier Dahua Entry driver assignment below. `ip_camera.py` reads authenticated JPEGs
