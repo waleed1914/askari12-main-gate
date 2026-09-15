@@ -208,6 +208,32 @@ def test_database_path_follows_the_configured_data_folder() -> None:
     assert str(default_database_path(settings)).startswith(settings.storage.data_directory)
 
 
+def test_existing_settings_gain_the_confirmed_anpr_map(tmp_path) -> None:
+    path = tmp_path / "camera-map.sqlite3"
+    first = Store(path)
+    settings = default_settings()
+    old_cameras = tuple(
+        replace(camera, lane="Visitor Entry", http_port=80, snapshot_path="")
+        if camera.ip_address == "192.168.1.12" else camera
+        for camera in settings.cameras
+    )
+    first.settings.save(replace(settings, cameras=old_cameras))
+    first.database.connection.execute("UPDATE schema_version SET version = 6")
+    first.database.connection.commit()
+    first.close()
+
+    second = Store(path)
+    try:
+        migrated = second.settings.load()
+        exit_anpr = next(camera for camera in migrated.cameras if camera.ip_address == "192.168.1.12")
+        entry_anpr = next(camera for camera in migrated.cameras if camera.ip_address == "192.168.1.13")
+        assert (exit_anpr.lane, exit_anpr.port, exit_anpr.http_port) == ("Visitor Exit", 37777, 84)
+        assert exit_anpr.snapshot_path == "/cgi-bin/snapshot.cgi"
+        assert (entry_anpr.lane, entry_anpr.port, entry_anpr.http_port) == ("Visitor Entry", 37778, 80)
+    finally:
+        second.close()
+
+
 def test_an_older_database_gains_the_new_visit_columns(tmp_path) -> None:
     """Their live database already holds visits, so the change must migrate, not recreate."""
     import sqlite3

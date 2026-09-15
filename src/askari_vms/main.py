@@ -9,10 +9,10 @@ from askari_vms.audit import AuditLog
 from askari_vms.cnic_ocr import LocalCNICReader
 from askari_vms.controller_events import entry_event_feed
 from askari_vms.gate_controller import entry_gate_controller
-from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_driver_feed
+from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_anpr_snapshot_feed, exit_driver_feed
 from askari_vms.printing import DirectUsbPrinter
 from askari_vms.speech import OfflineDictation, default_model_path
-from askari_vms.anpr import entry_anpr_feed
+from askari_vms.anpr import entry_anpr_feed, exit_anpr_feed
 
 from askari_vms.routing import Portal, portal_for
 from askari_vms.settings import default_settings
@@ -82,6 +82,8 @@ def main() -> int:
                 session=session,
                 on_checkout=store.visits.save,
                 driver_camera=exit_driver_feed(settings),
+                anpr_camera=exit_anpr_snapshot_feed(settings),
+                anpr_feed=exit_anpr_feed(settings),
                 image_directory=settings.storage.data_directory,
             )
             audit.record(

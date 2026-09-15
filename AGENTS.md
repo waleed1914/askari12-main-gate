@@ -82,8 +82,9 @@ missed cameras submit and are listed too; both raise the event to WARNING. A pla
 an open visit warns and still allows. A returning vehicle or CNIC is *offered* for reuse
 and never auto-filled — photographs are always taken fresh.
 
-**Not built yet:** the Dashboard (still four zeroed cards), full Exit ANPR integration,
-and controller card synchronization. Visitor Exit physical control is not integrated yet.
+**Not built yet:** the Dashboard (still four zeroed cards), controller card
+synchronization, and Exit ANPR evidence-image persistence. Visitor Exit physical
+control is not integrated yet.
 
 Stack: Python 3.12 + PySide6 (Qt6), `pytest`. Entry point `python -m askari_vms`.
 
@@ -121,8 +122,10 @@ backoff and leave manual entry available. Credentials remain in Windows Credenti
 Manager, scoped by the configured camera key and address.
 
 Camera keys are durable identifiers, not lane assignments: `.13` retains its legacy
-`anpr_exit` key but is assigned to Entry. `.12` is now Unassigned until its physical
-lane is confirmed; do not assume it is Exit. The factory selects by role and lane.
+`anpr_exit` key but is assigned to Entry (SDK 37778, HTTP 80). `.12` retains its legacy
+`anpr_entry` key but was physically confirmed as Visitor Exit on 2026-09-15 (SDK 37777,
+HTTP 84). Both use `/cgi-bin/snapshot.cgi` plus the TrafficJunction subscription. The
+factory selects by role and lane, never by these historical keys.
 The ANPR panel currently reports detection status; plate detection does not claim to
 capture an overview or cropped-plate image. Integration was checked against the
 [Dahua real-time subscription specification](https://files.dahua.support/Solutions/Access%20Control%20Solution/Integration/DAHUA%20ACCESS%20CONTROL%20PRODUCTS%20INTEGRATION%20INSTRUCTION%20Ver1.0.pdf).
@@ -152,8 +155,9 @@ stale frames and image write failures flag missing evidence and still allow subm
 Entry ANPR detection is also integrated as described above. The Exit driver camera at
 `192.168.1.17` uses the same authenticated Hikvision snapshot endpoint; its live view
 runs outside Qt and Capture/Submit saves a fresh image under
-`data/images/driver_exit/YYYY-MM-DD`. Exit ANPR and Visitor Exit gate commands remain
-simulated.
+`data/images/driver_exit/YYYY-MM-DD`. Exit ANPR `.12:84` now has an authenticated live
+snapshot view and TrafficJunction detection; recognized plates automatically open the
+matching active visit. Visitor Exit gate commands remain simulated.
 
 Recovered from the ConfigTool scan. E-tag lanes have **no cameras**; the controller
 already knows who the holder is, so only event data is needed there.
@@ -516,8 +520,8 @@ Audit events now carry the signed-in operator and workstation. The `system` /
 - Second controller's IP is unassigned.
 - Entry driver camera confirmed by the user on 2026-09-09: `http://192.168.1.16/`.
   This supersedes the earlier ConfigTool scan address `.14` for Visitor Entry.
-- Camera lane assignment: ANPR .13 / driver .16 on Visitor Entry, driver .17 on
-  Visitor Exit. ANPR .12 is Unassigned pending physical lane confirmation.
+- Camera lane assignment: ANPR .13 / driver .16 on Visitor Entry; ANPR .12 / driver
+  .17 on Visitor Exit.
 - Settings is UI + validation only: nothing is persisted and "Test connection" is
   simulated. Reachability testing is the controller adapter's first job.
 - Controller passwords are held in memory for the session only. They belong in the

@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -142,7 +142,39 @@ class Database:
                 old_version = int(row["version"])
                 if old_version < 5 and self.count("categories") == 0:
                     self._seed_category_migration()
+                if old_version < 7:
+                    self._migrate_confirmed_camera_map()
                 self.connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+
+    def _migrate_confirmed_camera_map(self) -> None:
+        """Apply the physically confirmed ANPR assignments to existing installations."""
+        row = self.connection.execute(
+            "SELECT value FROM app_settings WHERE key = 'app'"
+        ).fetchone()
+        if row is None:
+            return
+        try:
+            data = json.loads(row["value"])
+            cameras = {camera.get("key"): camera for camera in data.get("cameras", [])}
+            exit_anpr = cameras.get("anpr_entry")
+            entry_anpr = cameras.get("anpr_exit")
+            if exit_anpr is not None and exit_anpr.get("ip_address") == "192.168.1.12":
+                exit_anpr.update(
+                    lane="Visitor Exit", port=37777, http_port=84,
+                    snapshot_path="/cgi-bin/snapshot.cgi",
+                    anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5",
+                )
+            if entry_anpr is not None and entry_anpr.get("ip_address") == "192.168.1.13":
+                entry_anpr.update(
+                    lane="Visitor Entry", port=37778, http_port=80,
+                    snapshot_path="/cgi-bin/snapshot.cgi",
+                    anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5",
+                )
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+            return
+        self.connection.execute(
+            "UPDATE app_settings SET value = ? WHERE key = 'app'", (json.dumps(data),)
+        )
 
     def _seed_category_migration(self) -> None:
         """Give pre-category databases initial shortcuts exactly once."""

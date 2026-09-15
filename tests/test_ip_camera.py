@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage
 
 from askari_vms.ip_camera import (
     CameraError, CameraFrame, SnapshotClient, SnapshotFeed, entry_anpr_snapshot_feed,
-    exit_driver_feed,
+    exit_anpr_snapshot_feed, exit_driver_feed,
 )
 from askari_vms.settings import default_settings
 from askari_vms.storage import Store
@@ -52,6 +52,12 @@ def test_exit_driver_uses_confirmed_hikvision_camera():
     assert feed is not None
     assert feed.client.key == "driver_exit"
     assert feed.client.url == "http://192.168.1.17:80/ISAPI/Streaming/channels/101/picture"
+
+
+def test_exit_anpr_live_view_uses_confirmed_http_port():
+    feed = exit_anpr_snapshot_feed(default_settings())
+    assert feed is not None
+    assert feed.client.url == "http://192.168.1.12:84/cgi-bin/snapshot.cgi"
 
 
 def test_exit_driver_live_view_and_capture_are_persisted(qapp, tmp_path):

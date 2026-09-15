@@ -154,3 +154,15 @@ def entry_anpr_snapshot_feed(settings: AppSettings) -> SnapshotFeed | None:
         SnapshotClient(camera.key, camera.ip_address, camera.http_port, path),
         "ANPR camera",
     )
+
+
+def exit_anpr_snapshot_feed(settings: AppSettings) -> SnapshotFeed | None:
+    camera = next((c for c in settings.cameras if c.role == ANPR and c.lane == VISITOR_EXIT
+                   and c.ip_address), None)
+    if camera is None:
+        return None
+    return SnapshotFeed(
+        SnapshotClient(camera.key, camera.ip_address, camera.http_port,
+                       camera.snapshot_path or "/cgi-bin/snapshot.cgi"),
+        "Exit ANPR camera",
+    )

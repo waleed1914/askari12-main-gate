@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 from askari_vms.ip_camera import CameraError, read_credentials
-from askari_vms.settings import ANPR, VISITOR_ENTRY, AppSettings
+from askari_vms.settings import ANPR, VISITOR_ENTRY, VISITOR_EXIT, AppSettings
 
 DAHUA_EVENT_PATH = "/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5"
 MAX_PART = 10_000_000
@@ -212,5 +212,11 @@ class ANPRFeed:
 
 def entry_anpr_feed(settings: AppSettings) -> ANPRFeed | None:
     camera = next((c for c in settings.cameras if c.role == ANPR and c.lane == VISITOR_ENTRY
+                   and c.ip_address and c.anpr_event_path), None)
+    return ANPRFeed(camera.key, camera.ip_address, camera.http_port, camera.anpr_event_path) if camera else None
+
+
+def exit_anpr_feed(settings: AppSettings) -> ANPRFeed | None:
+    camera = next((c for c in settings.cameras if c.role == ANPR and c.lane == VISITOR_EXIT
                    and c.ip_address and c.anpr_event_path), None)
     return ANPRFeed(camera.key, camera.ip_address, camera.http_port, camera.anpr_event_path) if camera else None

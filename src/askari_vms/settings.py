@@ -101,8 +101,11 @@ def default_settings() -> AppSettings:
             ControllerSettings("exit", "Exit Controller"),
         ),
         cameras=(
-            CameraSettings("anpr_entry", ANPR, "ITC413-PW4D-Z3", "192.168.1.12", 37777, UNASSIGNED),
-            CameraSettings("anpr_exit", ANPR, "ITC413-PW4D-Z3", "192.168.1.13", 37777, VISITOR_ENTRY,
+            CameraSettings("anpr_entry", ANPR, "ITC413-PW4D-Z3", "192.168.1.12", 37777, VISITOR_EXIT,
+                           http_port=84, snapshot_path="/cgi-bin/snapshot.cgi",
+                           anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5"),
+            CameraSettings("anpr_exit", ANPR, "ITC413-PW4D-Z3", "192.168.1.13", 37778, VISITOR_ENTRY,
+                           snapshot_path="/cgi-bin/snapshot.cgi",
                            anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5"),
             CameraSettings("driver_entry", DRIVER, "DS-2CD1653G0-IZS", "192.168.1.16", 8000, VISITOR_ENTRY,
                            snapshot_path="/ISAPI/Streaming/channels/101/picture"),

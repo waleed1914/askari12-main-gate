@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from askari_vms.audit import AuditLog, AuditSeverity
 from askari_vms.auth import Session
+from askari_vms.anpr import ANPRFeed
 from askari_vms.ip_camera import SnapshotFeed
 from askari_vms.ui.brand import circular_logo
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
@@ -71,6 +72,8 @@ class ExitPortalWindow(QWidget):
         on_checkout: Callable[[VisitRecord], None] | None = None,
         gate: str = "C2 - Exit",
         driver_camera: SnapshotFeed | None = None,
+        anpr_camera: SnapshotFeed | None = None,
+        anpr_feed: ANPRFeed | None = None,
         image_directory: str = "",
     ) -> None:
         super().__init__()
@@ -80,6 +83,8 @@ class ExitPortalWindow(QWidget):
         self._on_checkout = on_checkout
         self._gate = gate
         self._driver_camera = driver_camera
+        self._anpr_camera = anpr_camera
+        self._anpr_feed = anpr_feed
         self._image_directory = image_directory
         self._driver_image = ""
         self._driver_after = time.monotonic()
@@ -102,6 +107,18 @@ class ExitPortalWindow(QWidget):
             self._driver_timer = QTimer(self)
             self._driver_timer.timeout.connect(self._refresh_driver)
             self._driver_timer.start(250)
+        self._anpr_camera_timer: QTimer | None = None
+        if self._anpr_camera is not None:
+            self._anpr_camera.start()
+            self._anpr_camera_timer = QTimer(self)
+            self._anpr_camera_timer.timeout.connect(self._refresh_anpr_camera)
+            self._anpr_camera_timer.start(250)
+        self._anpr_timer: QTimer | None = None
+        if self._anpr_feed is not None:
+            self._anpr_feed.start()
+            self._anpr_timer = QTimer(self)
+            self._anpr_timer.timeout.connect(self._refresh_anpr)
+            self._anpr_timer.start(250)
 
     # ---------- construction ----------
 
@@ -511,6 +528,25 @@ class ExitPortalWindow(QWidget):
                 )
             self._driver_available = available
 
+    def _refresh_anpr_camera(self) -> None:
+        frame = self._anpr_camera.latest()
+        panel = self._panels["anpr"]
+        if frame.fresh():
+            pixmap = QPixmap()
+            if pixmap.loadFromData(frame.jpeg, "JPG"):
+                panel.setPixmap(pixmap.scaled(max(320, panel.width()), 240,
+                    Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                return
+        panel.clear()
+        panel.setText(frame.message if not frame.jpeg else "ANPR camera stalled — reconnecting.")
+
+    def _refresh_anpr(self) -> None:
+        readings, (_connected, message) = self._anpr_feed.drain()
+        if self._anpr_camera is None:
+            self._panels["anpr"].setText(message)
+        for reading in readings:
+            self.read_plate(reading.plate)
+
     def _capture_driver(self) -> None:
         if self._driver_camera is None or self._driver_image:
             return
@@ -668,6 +704,14 @@ class ExitPortalWindow(QWidget):
     def closeEvent(self, event) -> None:
         if self._driver_timer is not None:
             self._driver_timer.stop()
+        if self._anpr_camera_timer is not None:
+            self._anpr_camera_timer.stop()
+        if self._anpr_timer is not None:
+            self._anpr_timer.stop()
         if self._driver_camera is not None:
             self._driver_camera.stop()
+        if self._anpr_camera is not None:
+            self._anpr_camera.stop()
+        if self._anpr_feed is not None:
+            self._anpr_feed.stop()
         super().closeEvent(event)

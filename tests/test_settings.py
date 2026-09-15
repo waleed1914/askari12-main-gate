@@ -31,11 +31,13 @@ def test_defaults_match_the_surveyed_hardware() -> None:
     assert {camera.role for camera in settings.cameras} == {ANPR, "Driver"}
     assert next(camera for camera in settings.cameras if camera.key == "driver_entry").snapshot_path == "/ISAPI/Streaming/channels/101/picture"
     assert all(camera.port == 8000 for camera in settings.cameras if camera.role == "Driver")
-    assert all(camera.port == 37777 for camera in settings.cameras if camera.role == ANPR)
+    assert {(camera.ip_address, camera.port, camera.http_port) for camera in settings.cameras if camera.role == ANPR} == {
+        ("192.168.1.12", 37777, 84), ("192.168.1.13", 37778, 80),
+    }
     # Every visitor lane is covered; e-tag lanes are deliberately absent.
-    assert {camera.lane for camera in settings.cameras} == {VISITOR_ENTRY, VISITOR_EXIT, UNASSIGNED}
+    assert {camera.lane for camera in settings.cameras} == {VISITOR_ENTRY, VISITOR_EXIT}
     assert not validate_settings(settings)
-    assert unassigned_lanes(settings) == ("Visitor Exit has no ANPR camera",)
+    assert unassigned_lanes(settings) == ()
 
 
 def test_ip_and_port_validation() -> None:

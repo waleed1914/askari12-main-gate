@@ -4,7 +4,7 @@ import time
 import pytest
 
 from askari_vms.anpr import (
-    ANPRFeed, PlateDeduplicator, PlateReading, entry_anpr_feed,
+    ANPRFeed, PlateDeduplicator, PlateReading, entry_anpr_feed, exit_anpr_feed,
     multipart_parts, normalize_plate, parse_plate_events,
 )
 from askari_vms.ip_camera import CameraError
@@ -114,6 +114,13 @@ def test_queued_old_detection_does_not_fill_next_visitor(qapp):
 def test_assignment_follows_lane_not_legacy_camera_key():
     feed = entry_anpr_feed(default_settings())
     assert feed is not None and feed.address == "192.168.1.13"
+
+
+def test_exit_assignment_uses_confirmed_camera_and_http_port():
+    feed = exit_anpr_feed(default_settings())
+    assert feed is not None
+    assert feed.address == "192.168.1.12"
+    assert feed.base == "http://192.168.1.12:84"
 
 
 def test_subscription_recovers_and_errors_do_not_expose_credentials(monkeypatch):
