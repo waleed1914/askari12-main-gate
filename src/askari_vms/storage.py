@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS visits (
     exit_door TEXT NOT NULL, driver_match TEXT NOT NULL, receipt_lost INTEGER NOT NULL,
     father_name TEXT NOT NULL DEFAULT '', date_of_birth TEXT NOT NULL DEFAULT '',
     cnic_issue_date TEXT NOT NULL DEFAULT '', cnic_expiry_date TEXT NOT NULL DEFAULT '',
-    cnic_image TEXT NOT NULL DEFAULT ''
+    cnic_image TEXT NOT NULL DEFAULT '', driver_image TEXT NOT NULL DEFAULT '',
+    exit_driver_image TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_visits_entry ON visits(entry_time DESC);
 CREATE INDEX IF NOT EXISTS idx_visits_open ON visits(exit_time);
@@ -126,6 +127,7 @@ class Database:
             ("cnic_expiry_date", "TEXT NOT NULL DEFAULT \'\'"),
             ("cnic_image", "TEXT NOT NULL DEFAULT \'\'"),
             ("driver_image", "TEXT NOT NULL DEFAULT \'\'"),
+            ("exit_driver_image", "TEXT NOT NULL DEFAULT \'\'"),
         ),
     }
 
@@ -293,6 +295,7 @@ class VisitRepository(_Repository):
         "cnic", "mobile", "vehicle_number", "vehicle_category", "destination", "exit_time",
         "exit_operator", "exit_door", "driver_match", "receipt_lost",
         "father_name", "date_of_birth", "cnic_issue_date", "cnic_expiry_date", "cnic_image", "driver_image",
+        "exit_driver_image",
     )
 
     @staticmethod

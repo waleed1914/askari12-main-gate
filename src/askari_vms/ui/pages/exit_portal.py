@@ -12,10 +12,14 @@ open the barrier at any time without a visit at all — that is audited as an ov
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
+import time
+from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QPixmap
+from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QImage, QKeySequence, QShortcut, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -23,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from askari_vms.audit import AuditLog, AuditSeverity
 from askari_vms.auth import Session
+from askari_vms.ip_camera import SnapshotFeed
 from askari_vms.ui.brand import circular_logo
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
 from askari_vms.visits import (
@@ -65,6 +70,8 @@ class ExitPortalWindow(QWidget):
         session: Session | None = None,
         on_checkout: Callable[[VisitRecord], None] | None = None,
         gate: str = "C2 - Exit",
+        driver_camera: SnapshotFeed | None = None,
+        image_directory: str = "",
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -72,6 +79,12 @@ class ExitPortalWindow(QWidget):
         self._session = session
         self._on_checkout = on_checkout
         self._gate = gate
+        self._driver_camera = driver_camera
+        self._image_directory = image_directory
+        self._driver_image = ""
+        self._driver_after = time.monotonic()
+        self._driver_displayed_at = 0.0
+        self._driver_available: bool | None = None
         self._visit: VisitRecord | None = None
         self._decision: str = ""
         self._captured: dict[str, bool] = {key: False for key in CAPTURE_LABELS}
@@ -83,6 +96,12 @@ class ExitPortalWindow(QWidget):
         self._build()
         self._install_shortcuts()
         self.clear()
+        self._driver_timer: QTimer | None = None
+        if self._driver_camera is not None:
+            self._driver_camera.start()
+            self._driver_timer = QTimer(self)
+            self._driver_timer.timeout.connect(self._refresh_driver)
+            self._driver_timer.start(250)
 
     # ---------- construction ----------
 
@@ -268,6 +287,7 @@ class ExitPortalWindow(QWidget):
             state = QLabel("No feed")
             state.setProperty("muted", "true")
             state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            state.setMinimumHeight(180)
             box.addWidget(name)
             box.addStretch()
             box.addWidget(state)
@@ -450,11 +470,68 @@ class ExitPortalWindow(QWidget):
         self.decision_note.style().polish(self.decision_note)
 
     def capture(self) -> None:
-        for key in self._captured:
-            self._captured[key] = True
-        for key, _title in STREAMS:
-            self._panels[key].setText("Captured (simulated)")
-        self.status.setText("Captured exit driver, ANPR overview and plate crop (simulated).")
+        # ANPR evidence remains behind its adapter. The real driver frame is saved
+        # independently, and its failure never prevents checkout.
+        self._captured["anpr"] = True
+        self._captured["plate"] = True
+        self._capture_driver()
+        self._panels["anpr"].setText("Captured (simulated)")
+        if self._driver_camera is None:
+            self._captured["driver"] = True
+            self._panels["driver"].setText("Captured (simulated)")
+        self.status.setText(
+            "Exit driver photo captured." if self._captured["driver"]
+            else "No fresh driver photo. You may still submit."
+        )
+
+    def _refresh_driver(self) -> None:
+        frame = self._driver_camera.latest()
+        panel = self._panels["driver"]
+        available = frame.fresh()
+        if available and frame.received_at != self._driver_displayed_at:
+            pixmap = QPixmap()
+            available = pixmap.loadFromData(frame.jpeg, "JPG")
+            if available:
+                panel.setPixmap(pixmap.scaled(
+                    max(320, panel.width()), 240,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+                self._driver_displayed_at = frame.received_at
+        if not available:
+            panel.clear()
+            panel.setText(frame.message if not frame.jpeg else "Driver camera stalled — reconnecting.")
+        if available != self._driver_available:
+            if available or self._driver_available is not None:
+                self._audit.record(
+                    action="Hardware event", target="Visitor Exit driver camera",
+                    summary="Driver camera connected" if available else "Driver camera unavailable",
+                    details="Automatic snapshot feed. Manual visitor exit remains available.",
+                    severity=AuditSeverity.INFO if available else AuditSeverity.WARNING,
+                )
+            self._driver_available = available
+
+    def _capture_driver(self) -> None:
+        if self._driver_camera is None or self._driver_image:
+            return
+        frame = self._driver_camera.latest()
+        if not frame.fresh(self._driver_after):
+            self._captured["driver"] = False
+            return
+        image = QImage.fromData(frame.jpeg, "JPG")
+        try:
+            if image.isNull() or not self._image_directory:
+                raise OSError("No image or data directory")
+            folder = Path(self._image_directory) / "images" / "driver_exit" / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{uuid4().hex}.jpg"
+            if not image.save(str(path), "JPG", 95):
+                raise OSError("Image write failed")
+        except OSError:
+            self._captured["driver"] = False
+            return
+        self._driver_image = str(path)
+        self._captured["driver"] = True
 
     def clear(self) -> None:
         self.evidence.clear()
@@ -464,6 +541,8 @@ class ExitPortalWindow(QWidget):
         self._decision = ""
         self._matches = []
         self._captured = {key: False for key in self._captured}
+        self._driver_image = ""
+        self._driver_after = time.monotonic()
         self.search.clear()
         self.receipt_lost.setChecked(False)
         self.results.hide()
@@ -520,6 +599,11 @@ class ExitPortalWindow(QWidget):
             self.status.setText("Mark the driver Matched or Mismatched first.")
             self._update_decision_note()
             return None
+
+        if not self._captured["driver"]:
+            self._capture_driver()
+        if self._driver_image:
+            self._visit = replace(self._visit, exit_driver_image=self._driver_image)
 
         closed = check_out(
             self._visit,
@@ -580,3 +664,10 @@ class ExitPortalWindow(QWidget):
             self._session = None
         self.signed_out.emit()
         self.close()
+
+    def closeEvent(self, event) -> None:
+        if self._driver_timer is not None:
+            self._driver_timer.stop()
+        if self._driver_camera is not None:
+            self._driver_camera.stop()
+        super().closeEvent(event)

@@ -30,7 +30,8 @@ def test_defaults_match_the_surveyed_hardware() -> None:
     assert len(settings.cameras) == 4
     assert {camera.role for camera in settings.cameras} == {ANPR, "Driver"}
     assert next(camera for camera in settings.cameras if camera.key == "driver_entry").snapshot_path == "/ISAPI/Streaming/channels/101/picture"
-    assert all(camera.port == 37777 for camera in settings.cameras if camera.key != "driver_entry")
+    assert all(camera.port == 8000 for camera in settings.cameras if camera.role == "Driver")
+    assert all(camera.port == 37777 for camera in settings.cameras if camera.role == ANPR)
     # Every visitor lane is covered; e-tag lanes are deliberately absent.
     assert {camera.lane for camera in settings.cameras} == {VISITOR_ENTRY, VISITOR_EXIT, UNASSIGNED}
     assert not validate_settings(settings)

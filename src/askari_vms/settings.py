@@ -106,7 +106,8 @@ def default_settings() -> AppSettings:
                            anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5"),
             CameraSettings("driver_entry", DRIVER, "DS-2CD1653G0-IZS", "192.168.1.16", 8000, VISITOR_ENTRY,
                            snapshot_path="/ISAPI/Streaming/channels/101/picture"),
-            CameraSettings("driver_exit", DRIVER, "DH-IPC-HFW2441", "192.168.1.15", 37777, VISITOR_EXIT),
+            CameraSettings("driver_exit", DRIVER, "DS-2CD1653G0-IZS", "192.168.1.17", 8000, VISITOR_EXIT,
+                           snapshot_path="/ISAPI/Streaming/channels/101/picture"),
         ),
     )
 

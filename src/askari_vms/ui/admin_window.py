@@ -18,7 +18,7 @@ from askari_vms.auth import Session
 from askari_vms.cnic_ocr import LocalCNICReader
 from askari_vms.controller_events import entry_event_feed
 from askari_vms.gate_controller import entry_gate_controller
-from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed
+from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_driver_feed
 from askari_vms.printing import DirectUsbPrinter
 from askari_vms.speech import OfflineDictation, default_model_path
 from askari_vms.anpr import entry_anpr_feed
@@ -324,6 +324,8 @@ class AdminWindow(QMainWindow):
             visits=self.store.visits.list(),
             session=self.session,
             on_checkout=self._visit_submitted,
+            driver_camera=exit_driver_feed(self.settings),
+            image_directory=self.settings.storage.data_directory,
         )
         self.exit_portal = portal
         portal.show()

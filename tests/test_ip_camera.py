@@ -1,15 +1,18 @@
 import time
+from datetime import datetime
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QImage
 
 from askari_vms.ip_camera import (
     CameraError, CameraFrame, SnapshotClient, SnapshotFeed, entry_anpr_snapshot_feed,
+    exit_driver_feed,
 )
 from askari_vms.settings import default_settings
 from askari_vms.storage import Store
 from askari_vms.ui.pages.entry_portal import EntryPortalWindow
 from askari_vms.ui.pages.exit_portal import ExitPortalWindow
+from askari_vms.visits import VisitRecord
 
 
 def jpeg():
@@ -42,6 +45,38 @@ def test_entry_anpr_live_view_uses_assigned_camera_and_dahua_snapshot_path():
     assert feed is not None
     assert feed.client.key == "anpr_exit"  # durable key; .13 is assigned to Entry
     assert feed.client.url == "http://192.168.1.13:80/cgi-bin/snapshot.cgi"
+
+
+def test_exit_driver_uses_confirmed_hikvision_camera():
+    feed = exit_driver_feed(default_settings())
+    assert feed is not None
+    assert feed.client.key == "driver_exit"
+    assert feed.client.url == "http://192.168.1.17:80/ISAPI/Streaming/channels/101/picture"
+
+
+def test_exit_driver_live_view_and_capture_are_persisted(qapp, tmp_path):
+    feed = FakeFeed()
+    store = Store(tmp_path / "exit.sqlite3")
+    visit = VisitRecord("V-EXIT-CAM", "TOKEN", datetime.now(), "entry01")
+    store.visits.save(visit)
+    portal = ExitPortalWindow(
+        visits=[visit], driver_camera=feed, image_directory=str(tmp_path),
+        on_checkout=store.visits.save,
+    )
+    try:
+        portal.select(visit)
+        portal.set_decision("Matched")
+        time.sleep(0.02)
+        feed.frame = CameraFrame(jpeg(), time.monotonic(), "Live")
+        portal._refresh_driver()
+        assert not portal._panels["driver"].pixmap().isNull()
+        closed = portal.submit()
+        assert closed is not None and closed.exit_driver_image
+        assert not QImage(closed.exit_driver_image).isNull()
+        assert store.visits.list()[0].exit_driver_image == closed.exit_driver_image
+    finally:
+        portal.close()
+        store.close()
 
 
 def test_entry_portal_displays_the_anpr_live_snapshot(qapp):

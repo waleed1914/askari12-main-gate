@@ -82,8 +82,8 @@ missed cameras submit and are listed too; both raise the event to WARNING. A pla
 an open visit warns and still allows. A returning vehicle or CNIC is *offered* for reuse
 and never auto-filled — photographs are always taken fresh.
 
-**Not built yet:** the Dashboard (still four zeroed cards), Exit portal, and controller
-event/card synchronization. Visitor Exit physical control is not integrated yet.
+**Not built yet:** the Dashboard (still four zeroed cards), full Exit ANPR integration,
+and controller card synchronization. Visitor Exit physical control is not integrated yet.
 
 Stack: Python 3.12 + PySide6 (Qt6), `pytest`. Entry point `python -m askari_vms`.
 
@@ -149,8 +149,11 @@ Schema version 4 adds `VisitRecord.driver_image`; old records remain valid with 
 empty path. Exit and VMS detail show the saved entry driver photograph. Clearing the
 form prevents the preceding visitor's cached frame from being reused. Missing or
 stale frames and image write failures flag missing evidence and still allow submit.
-Entry ANPR detection is also integrated as described above. Other IP camera feeds,
-Visitor Exit and Admin manual gate commands remain simulated.
+Entry ANPR detection is also integrated as described above. The Exit driver camera at
+`192.168.1.17` uses the same authenticated Hikvision snapshot endpoint; its live view
+runs outside Qt and Capture/Submit saves a fresh image under
+`data/images/driver_exit/YYYY-MM-DD`. Exit ANPR and Visitor Exit gate commands remain
+simulated.
 
 Recovered from the ConfigTool scan. E-tag lanes have **no cameras**; the controller
 already knows who the holder is, so only event data is needed there.
@@ -160,9 +163,10 @@ already knows who the holder is, so only event data is needed there.
 | ANPR (ITC) | `ITC413-PW4D-Z3` | 192.168.1.12 | V5.004 |
 | ANPR (ITC) | `ITC413-PW4D-Z3` | 192.168.1.13 | V5.004 |
 | Driver (IPC) | `DH-IPC-HFW2441…` | 192.168.1.14 | V2.840 |
-| Driver (IPC) | `DH-IPC-HFW2441…` | 192.168.1.15 | V2.840 |
+| Driver (IPC) | `DS-2CD1653G0-IZS` | 192.168.1.17 | To verify |
 
-All on Dahua SDK port `37777`. Assign each to Visitor Entry / Visitor Exit in Settings.
+The Dahua cameras use SDK port `37777`; the Hikvision driver cameras use port `8000`.
+Assign each only to its confirmed Visitor Entry / Visitor Exit lane in Settings.
 
 ### Peripherals
 
@@ -512,7 +516,7 @@ Audit events now carry the signed-in operator and workstation. The `system` /
 - Second controller's IP is unassigned.
 - Entry driver camera confirmed by the user on 2026-09-09: `http://192.168.1.16/`.
   This supersedes the earlier ConfigTool scan address `.14` for Visitor Entry.
-- Camera lane assignment: ANPR .13 / driver .16 on Visitor Entry, driver .15 on
+- Camera lane assignment: ANPR .13 / driver .16 on Visitor Entry, driver .17 on
   Visitor Exit. ANPR .12 is Unassigned pending physical lane confirmation.
 - Settings is UI + validation only: nothing is persisted and "Test connection" is
   simulated. Reachability testing is the controller adapter's first job.

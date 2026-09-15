@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.request
 
-from askari_vms.settings import ANPR, AppSettings, DRIVER, VISITOR_ENTRY
+from askari_vms.settings import ANPR, AppSettings, DRIVER, VISITOR_ENTRY, VISITOR_EXIT
 
 MAX_IMAGE_BYTES = 10_000_000
 MAX_FRAME_AGE = 3.0
@@ -125,6 +125,17 @@ def entry_driver_feed(settings: AppSettings) -> SnapshotFeed | None:
     return SnapshotFeed(
         SnapshotClient(camera.key, camera.ip_address, camera.http_port, camera.snapshot_path),
         "driver camera",
+    )
+
+
+def exit_driver_feed(settings: AppSettings) -> SnapshotFeed | None:
+    camera = next((c for c in settings.cameras if c.role == DRIVER and c.lane == VISITOR_EXIT
+                   and c.ip_address and c.snapshot_path), None)
+    if camera is None:
+        return None
+    return SnapshotFeed(
+        SnapshotClient(camera.key, camera.ip_address, camera.http_port, camera.snapshot_path),
+        "Exit driver camera",
     )
 
 
