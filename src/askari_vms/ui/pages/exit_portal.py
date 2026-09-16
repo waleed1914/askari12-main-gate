@@ -12,6 +12,7 @@ open the barrier at any time without a visit at all — that is audited as an ov
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,8 @@ from askari_vms.controller_events import ControllerEventFeed, ControllerReading
 from askari_vms.etag_events import ETagEvent, OUT, REPEAT_PASSAGE_SECONDS, build_event, collapse_repeated_passages
 from askari_vms.etags import ETagRecord
 from askari_vms.ip_camera import SnapshotFeed
+from askari_vms.controllers import DoorCommand
+from askari_vms.gate_controller import GateController
 from askari_vms.lan_client import ExitSyncService
 from askari_vms.ui.brand import circular_logo
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
@@ -84,6 +87,7 @@ class ExitPortalWindow(QWidget):
         controller_event_feed: ControllerEventFeed | None = None,
         on_etag_event: Callable[[ETagEvent], None] | None = None,
         central_sync: ExitSyncService | None = None,
+        gate_controller: GateController | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -100,6 +104,10 @@ class ExitPortalWindow(QWidget):
         self._controller_event_feed = controller_event_feed
         self._on_etag_event = on_etag_event
         self._central_sync = central_sync
+        self._gate_controller = gate_controller
+        self._gate_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="exit-gate") if gate_controller else None
+        self._gate_jobs: dict[Future, tuple[str, bool]] = {}
+        self._gate_timer: QTimer | None = None
         self._driver_image = ""
         self._driver_after = time.monotonic()
         self._driver_displayed_at = 0.0
@@ -115,6 +123,10 @@ class ExitPortalWindow(QWidget):
         self._build()
         self._install_shortcuts()
         self.clear()
+        if self._gate_controller is not None:
+            self._gate_timer = QTimer(self)
+            self._gate_timer.timeout.connect(self._poll_gate_jobs)
+            self._gate_timer.start(100)
         self._driver_timer: QTimer | None = None
         if self._driver_camera is not None:
             self._driver_camera.start()
@@ -195,8 +207,11 @@ class ExitPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
-        self.simulation = QLabel("HARDWARE DISABLED — SIMULATION MODE")
-        self.simulation.setProperty("status", "warning")
+        self.simulation = QLabel(
+            "EXIT BARRIER CONNECTED" if self._gate_controller is not None
+            else "EXIT BARRIER UNAVAILABLE — MANUAL OPERATION"
+        )
+        self.simulation.setProperty("status", "success" if self._gate_controller is not None else "warning")
         row.addWidget(self.simulation)
 
         self.open_gate_button = QPushButton("Open gate")
@@ -716,17 +731,48 @@ class ExitPortalWindow(QWidget):
     def open_gate_manually(self) -> None:
         """The operator may always open the barrier, with or without a visit."""
         target = self._visit.visit_id if self._visit else "no visit"
-        self._audit.record(
-            action="Gate command",
-            target="Visitor Exit",
-            summary="Visitor Exit opened manually",
-            details=(
-                f"Operator opened Visitor Exit by hand ({target}). No exit transaction was "
-                "submitted. Simulated: no physical command was transmitted."
-            ),
-            severity=AuditSeverity.WARNING,
-        )
-        self.status.setText("Visitor Exit opened manually. The action is recorded.")
+        if self._queue_gate_open(target, manual=True):
+            self.status.setText("Opening Visitor Exit…")
+        else:
+            self._audit.record(
+                action="Gate command", target="Visitor Exit",
+                summary="Visitor Exit manual open unavailable",
+                details=f"Operator requested a manual open ({target}), but no Exit controller is configured.",
+                severity=AuditSeverity.WARNING,
+            )
+            self.status.setText("Exit controller unavailable — open the barrier manually.")
+
+    def _queue_gate_open(self, target: str, manual: bool) -> bool:
+        if self._gate_controller is None or self._gate_executor is None:
+            return False
+        future = self._gate_executor.submit(self._gate_controller.command, 1, DoorCommand.OPEN)
+        self._gate_jobs[future] = (target, manual)
+        return True
+
+    def _poll_gate_jobs(self) -> None:
+        for future, (target, manual) in list(self._gate_jobs.items()):
+            if not future.done():
+                continue
+            del self._gate_jobs[future]
+            try:
+                future.result()
+            except Exception as exc:
+                self._audit.record(
+                    action="Gate command", target="Visitor Exit",
+                    summary=f"Visitor Exit failed to open for {target}",
+                    details=f"{exc} Checkout remains saved; operator must open the barrier manually.",
+                    severity=AuditSeverity.CRITICAL,
+                )
+                self.status.setText(f"{target}: barrier did not open — open it manually. {exc}")
+            else:
+                self._audit.record(
+                    action="Gate command", target="Visitor Exit",
+                    summary=f"Visitor Exit opened for {target}",
+                    details=("Manual operator open confirmed by Exit controller."
+                             if manual else "Checkout submitted and Exit controller confirmed Door 2 open."),
+                    severity=AuditSeverity.WARNING if manual else AuditSeverity.INFO,
+                )
+                self.status.setText(f"{target}: Visitor Exit barrier opened successfully.")
 
     def submit(self) -> VisitRecord | None:
         """Close the visit and open the gate. Refuses only when nothing is selected."""
@@ -762,7 +808,6 @@ class ExitPortalWindow(QWidget):
             details.append("Receipt reported lost; the visit was found by manual search.")
         if uncaptured:
             details.append("No exit image captured from: " + ", ".join(uncaptured) + ".")
-        details.append("Simulated: no physical command was transmitted.")
 
         mismatched = self._decision == DriverMatch.MISMATCHED
         self._audit.record(
@@ -773,21 +818,21 @@ class ExitPortalWindow(QWidget):
             severity=AuditSeverity.WARNING if (mismatched or uncaptured or closed.receipt_lost)
             else AuditSeverity.INFO,
         )
-        self._audit.record(
-            action="Gate command",
-            target="Visitor Exit",
-            summary=f"Visitor Exit opened for {closed.visit_id}",
-            details=(
-                f"Exit submitted for {closed.visit_id} and Visitor Exit opened. "
-                "Simulated: no physical command was transmitted."
-            ),
-        )
-
         if self._on_checkout is not None:
             self._on_checkout(closed)
         self.closed_visit.emit(closed)
 
-        message = f"{closed.visit_id} exited. Driver {self._decision}. Visitor Exit opened."
+        queued = self._queue_gate_open(closed.visit_id, manual=False)
+        if not queued:
+            self._audit.record(
+                action="Gate command", target="Visitor Exit",
+                summary=f"Visitor Exit open unavailable for {closed.visit_id}",
+                details="Checkout was saved but no Exit controller is configured. Operator must open manually.",
+                severity=AuditSeverity.CRITICAL,
+            )
+
+        message = (f"{closed.visit_id} exited. Opening Visitor Exit…" if queued else
+                   f"{closed.visit_id} exited. Open the barrier manually — controller unavailable.")
         self.clear()
         self.status.setText(message)
         return closed
@@ -805,6 +850,10 @@ class ExitPortalWindow(QWidget):
         self.close()
 
     def closeEvent(self, event) -> None:
+        if self._gate_timer is not None:
+            self._gate_timer.stop()
+        if self._gate_executor is not None:
+            self._gate_executor.shutdown(wait=False, cancel_futures=True)
         if self._driver_timer is not None:
             self._driver_timer.stop()
         if self._anpr_camera_timer is not None:

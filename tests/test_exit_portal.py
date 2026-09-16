@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import time
 
 import pytest
 
@@ -201,6 +202,31 @@ def test_the_gate_can_be_opened_with_no_visit_at_all(portal) -> None:
     event = next(e for e in portal._audit.events() if e.action == "Gate command")
     assert event.severity.value == "Warning", "a manual open is an exception worth flagging"
     assert "no visit" in event.details
+
+
+def test_exit_submit_opens_physical_door_two_without_blocking(qapp) -> None:
+    calls = []
+    class Gate:
+        def command(self, door_index, command):
+            calls.append((door_index, command))
+
+    portal = ExitPortalWindow(visits=[a_visit()], gate_controller=Gate())
+    try:
+        portal.select(portal._visits[0])
+        portal.set_decision(DriverMatch.MATCHED)
+        assert portal.submit() is not None
+        deadline = time.monotonic() + 1
+        while not calls and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        portal._poll_gate_jobs()
+        from askari_vms.controllers import DoorCommand
+        assert calls == [(1, DoorCommand.OPEN)]
+        assert "barrier opened successfully" in portal.status.text()
+        assert any(e.action == "Gate command" and "confirmed" in e.details
+                   for e in portal._audit.events())
+    finally:
+        portal.close()
 
 
 def test_submitting_returns_focus_to_the_scanner(portal) -> None:

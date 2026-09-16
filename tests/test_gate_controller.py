@@ -4,6 +4,7 @@ from askari_vms.gate_controller import (
     HttpGateController,
     credential_target,
     entry_gate_controller,
+    exit_gate_controller,
 )
 from askari_vms.settings import default_settings
 
@@ -24,6 +25,13 @@ def test_entry_factory_uses_current_controller_address():
     assert controller is not None
     assert controller.address == "192.168.1.10"
     assert credential_target("entry", controller.address) == "AskariVMS/controller/entry/192.168.1.10"
+
+
+def test_exit_factory_uses_confirmed_controller_address():
+    controller = exit_gate_controller(default_settings())
+    assert controller is not None
+    assert controller.address == "192.168.1.11"
+    assert credential_target("exit", controller.address) == "AskariVMS/controller/exit/192.168.1.11"
 
 
 def test_visitor_entry_open_targets_physical_door_two(monkeypatch):

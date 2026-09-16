@@ -81,3 +81,13 @@ def entry_gate_controller(settings: AppSettings) -> HttpGateController | None:
     if configured is None:
         return None
     return HttpGateController(configured.key, configured.ip_address, configured.port)
+
+
+def exit_gate_controller(settings: AppSettings) -> HttpGateController | None:
+    configured = next(
+        (item for item in settings.controllers if item.key == "exit" and item.configured),
+        None,
+    )
+    if configured is None:
+        return None
+    return HttpGateController(configured.key, configured.ip_address, configured.port)
