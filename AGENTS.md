@@ -85,12 +85,15 @@ and never auto-filled — photographs are always taken fresh.
 **Central LAN service:** `lan_server.py` runs separately on Entry `192.168.1.40:8765`.
 It is authenticated by a random Windows Credential Manager token, restricts clients to
 Exit `192.168.1.34`, and exposes health, open visits, checkout and Exit e-tag ingestion.
-Only Entry opens the WAL database. `scripts/install_entry_server.ps1` installs its
-restricted firewall rule and per-user auto-restarting logon task. The Exit client and
-offline retry queue are the next step and are not wired yet.
+Only Entry opens the authoritative WAL database. `scripts/install_entry_server.ps1`
+installs its restricted firewall rule and per-user auto-restarting logon task.
+`lan_client.py` runs network work outside Qt on Exit: it refreshes active visits, uploads
+fresh Exit driver evidence, sends checkout/e-tag events, and stores every outbound
+mutation in the Exit PC's local `sync_outbox` table until Entry acknowledges it. The
+operator never waits on `.40`, and cable/server failures retry automatically.
 
 **Not built yet:** the Dashboard (still four zeroed cards), controller card
-synchronization, Exit ANPR evidence-image persistence, and Exit LAN client. Visitor
+synchronization and Exit ANPR overview/plate-crop persistence. Visitor
 Exit physical control is not integrated yet.
 
 Stack: Python 3.12 + PySide6 (Qt6), `pytest`. Entry point `python -m askari_vms`.

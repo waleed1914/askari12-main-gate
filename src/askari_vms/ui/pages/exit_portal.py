@@ -32,6 +32,7 @@ from askari_vms.controller_events import ControllerEventFeed, ControllerReading
 from askari_vms.etag_events import ETagEvent, OUT, REPEAT_PASSAGE_SECONDS, build_event, collapse_repeated_passages
 from askari_vms.etags import ETagRecord
 from askari_vms.ip_camera import SnapshotFeed
+from askari_vms.lan_client import ExitSyncService
 from askari_vms.ui.brand import circular_logo
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
 from askari_vms.visits import (
@@ -82,6 +83,7 @@ class ExitPortalWindow(QWidget):
         etags: Sequence[ETagRecord] | None = None,
         controller_event_feed: ControllerEventFeed | None = None,
         on_etag_event: Callable[[ETagEvent], None] | None = None,
+        central_sync: ExitSyncService | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -97,6 +99,7 @@ class ExitPortalWindow(QWidget):
         self._etags = list(etags or [])
         self._controller_event_feed = controller_event_feed
         self._on_etag_event = on_etag_event
+        self._central_sync = central_sync
         self._driver_image = ""
         self._driver_after = time.monotonic()
         self._driver_displayed_at = 0.0
@@ -136,6 +139,12 @@ class ExitPortalWindow(QWidget):
             self._controller_event_timer = QTimer(self)
             self._controller_event_timer.timeout.connect(self._refresh_controller_events)
             self._controller_event_timer.start(250)
+        self._central_sync_timer: QTimer | None = None
+        if self._central_sync is not None:
+            self._central_sync.start()
+            self._central_sync_timer = QTimer(self)
+            self._central_sync_timer.timeout.connect(self._refresh_central_sync)
+            self._central_sync_timer.start(500)
 
     # ---------- construction ----------
 
@@ -571,6 +580,18 @@ class ExitPortalWindow(QWidget):
         if readings:
             self.status.setText(message)
 
+    def _refresh_central_sync(self) -> None:
+        visits, (connected, message) = self._central_sync.latest()
+        if visits is not None:
+            selected_id = self._visit.visit_id if self._visit else ""
+            self._visits = visits
+            if selected_id:
+                refreshed = next((visit for visit in visits if visit.visit_id == selected_id), None)
+                if refreshed is not None:
+                    self._visit = refreshed
+        self.status.setText(message)
+        self.status.setProperty("syncConnected", connected)
+
     def _record_controller_reading(self, reading: ControllerReading) -> ETagEvent | None:
         # Both controllers use physical Door 1 for e-tags. Door 2 belongs to VMS.
         if reading.door != 1 or not reading.card:
@@ -764,6 +785,8 @@ class ExitPortalWindow(QWidget):
             self._anpr_timer.stop()
         if self._controller_event_timer is not None:
             self._controller_event_timer.stop()
+        if self._central_sync_timer is not None:
+            self._central_sync_timer.stop()
         if self._driver_camera is not None:
             self._driver_camera.stop()
         if self._anpr_camera is not None:
@@ -772,4 +795,6 @@ class ExitPortalWindow(QWidget):
             self._anpr_feed.stop()
         if self._controller_event_feed is not None:
             self._controller_event_feed.stop()
+        if self._central_sync is not None:
+            self._central_sync.stop()
         super().closeEvent(event)

@@ -21,6 +21,14 @@ def request(base, path, token="test-token", method="GET", payload=None):
         return response.status, json.load(response)
 
 
+def upload(base, path, data):
+    req = urllib.request.Request(base + path, data=data, method="POST", headers={
+        "Authorization": "Bearer test-token", "Content-Type": "image/jpeg",
+    })
+    with urllib.request.urlopen(req, timeout=2) as response:
+        return response.status, json.load(response)
+
+
 def running_server(path):
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0), handler_factory(path, "test-token", {"127.0.0.1"})
@@ -55,9 +63,13 @@ def test_open_visits_and_checkout_write_the_entry_database(tmp_path):
     try:
         status, body = request(base, "/api/v1/visits/open")
         assert status == 200 and body["visits"][0]["visit_id"] == visit.visit_id
+        status, image = upload(base, f"/api/v1/visits/{visit.visit_id}/exit-driver-image",
+                               b"\xff\xd8test-jpeg")
+        assert status == 200 and (tmp_path / "images") in __import__("pathlib").Path(image["path"]).parents
         status, body = request(base, f"/api/v1/visits/{visit.visit_id}/checkout", method="POST", payload={
             "exit_operator": "operator02", "driver_match": "Matched",
             "exit_time": "2026-09-16T11:00:00", "receipt_lost": False,
+            "exit_driver_image": image["path"],
         })
         assert status == 200 and body["visit"]["exit_operator"] == "operator02"
     finally:
@@ -68,6 +80,7 @@ def test_open_visits_and_checkout_write_the_entry_database(tmp_path):
         [closed] = store.visits.list()
         assert closed.exit_time == datetime(2026, 9, 16, 11)
         assert closed.driver_match == "Matched"
+        assert closed.exit_driver_image == image["path"]
         assert any(event.target == visit.visit_id for event in store.audit.list())
     finally:
         store.close()

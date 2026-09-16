@@ -10,6 +10,7 @@ from askari_vms.cnic_ocr import LocalCNICReader
 from askari_vms.controller_events import entry_event_feed, exit_event_feed
 from askari_vms.gate_controller import entry_gate_controller
 from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_anpr_snapshot_feed, exit_driver_feed
+from askari_vms.lan_client import ExitSyncService
 from askari_vms.printing import DirectUsbPrinter
 from askari_vms.speech import OfflineDictation, default_model_path
 from askari_vms.anpr import entry_anpr_feed, exit_anpr_feed
@@ -76,18 +77,20 @@ def main() -> int:
         elif destination is Portal.EXIT:
             audit = AuditLog(store.audit.list(), repository=store.audit)
             audit.set_operator(session.operator, session.workstation)
+            sync = ExitSyncService(store.database.path)
             window = ExitPortalWindow(
                 audit_log=audit,
                 visits=store.visits.list(),
                 session=session,
-                on_checkout=store.visits.save,
+                on_checkout=sync.queue_checkout,
                 driver_camera=exit_driver_feed(settings),
                 anpr_camera=exit_anpr_snapshot_feed(settings),
                 anpr_feed=exit_anpr_feed(settings),
                 image_directory=settings.storage.data_directory,
                 events=store.etag_events.list(), etags=store.etags.list(),
                 controller_event_feed=exit_event_feed(settings),
-                on_etag_event=store.etag_events.append,
+                on_etag_event=sync.queue_etag_event,
+                central_sync=sync,
             )
             audit.record(
                 action="Login",

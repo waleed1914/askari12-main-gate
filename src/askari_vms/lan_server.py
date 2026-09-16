@@ -6,7 +6,7 @@ local Store handle on Entry, which is safe alongside the desktop process in WAL 
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from enum import Enum
 from hmac import compare_digest
@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import secrets
 from urllib.parse import unquote
+from uuid import uuid4
 
 from askari_vms.audit import AuditLog, AuditSeverity
 from askari_vms.etag_events import ETagEvent, ETagEventKind
@@ -25,7 +26,7 @@ from askari_vms.visits import DriverMatch, check_out
 DEFAULT_BIND = "192.168.1.40"
 DEFAULT_PORT = 8765
 DEFAULT_EXIT_CLIENT = "192.168.1.34"
-MAX_BODY = 1_000_000
+MAX_BODY = 10_000_000
 
 
 def credential_target(address: str = DEFAULT_BIND) -> str:
@@ -128,6 +129,10 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
         def do_POST(self) -> None:
             if not self._authorized():
                 return
+            if self.path.startswith("/api/v1/visits/") and self.path.endswith("/exit-driver-image"):
+                visit_id = unquote(self.path[len("/api/v1/visits/"):-len("/exit-driver-image")]).strip("/")
+                self._exit_image(visit_id)
+                return
             body = self._body()
             if body is None:
                 return
@@ -151,7 +156,13 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                     self._reply(404, {"error": "visit_not_found"})
                     return
                 if not visit.is_inside:
-                    self._reply(409, {"error": "visit_already_closed"})
+                    # Checkout is idempotent: a lost HTTP response must not leave the
+                    # Exit outbox retrying a transaction that Entry already committed.
+                    if (visit.exit_operator == str(body.get("exit_operator", "Exit operator"))
+                            and visit.driver_match == body["driver_match"]):
+                        self._reply(200, {"visit": _visit_dict(visit)})
+                    else:
+                        self._reply(409, {"error": "visit_already_closed"})
                     return
                 try:
                     stamp = datetime.fromisoformat(body["exit_time"]) if body.get("exit_time") else None
@@ -163,6 +174,7 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                     driver_match=body["driver_match"], exit_time=stamp,
                     receipt_lost=bool(body.get("receipt_lost", False)),
                 )
+                closed = replace(closed, exit_driver_image=str(body.get("exit_driver_image", "")))
                 store.visits.save(closed)
                 AuditLog(store.audit.list(), repository=store.audit).record(
                     action="Visitor decision", target=closed.visit_id,
@@ -174,6 +186,31 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                 self._reply(200, {"visit": _visit_dict(closed)})
             finally:
                 store.close()
+
+        def _exit_image(self, visit_id: str) -> None:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = -1
+            if length <= 0 or length > MAX_BODY:
+                self._reply(413, {"error": "invalid_image_size"})
+                return
+            data = self.rfile.read(length)
+            if len(data) != length or not data.startswith(b"\xff\xd8"):
+                self._reply(400, {"error": "jpeg_required"})
+                return
+            store = Store(database_path)
+            try:
+                if not any(v.visit_id == visit_id for v in store.visits.list()):
+                    self._reply(404, {"error": "visit_not_found"})
+                    return
+            finally:
+                store.close()
+            folder = Path(database_path).parent / "images" / "driver_exit" / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{uuid4().hex}.jpg"
+            path.write_bytes(data)
+            self._reply(200, {"path": str(path)})
 
         def _etag_event(self, body: dict) -> None:
             required = ("event_id", "timestamp", "controller_name", "door", "direction", "rfid", "kind")

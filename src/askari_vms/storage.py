@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 
@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -95,6 +95,12 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+    item_id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL,
+    created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_created ON sync_outbox(created_at);
 """
 
 
@@ -498,6 +504,45 @@ class SettingsRepository(_Repository):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class OutboxItem:
+    item_id: str
+    kind: str
+    payload: str
+    created_at: datetime
+    attempts: int = 0
+    last_error: str = ""
+
+
+class OutboxRepository(_Repository):
+    table = "sync_outbox"
+
+    def enqueue(self, item_id: str, kind: str, payload: str) -> None:
+        self._write(
+            """INSERT INTO sync_outbox (item_id, kind, payload, created_at, attempts, last_error)
+               VALUES (?, ?, ?, ?, 0, '')
+               ON CONFLICT(item_id) DO UPDATE SET payload=excluded.payload""",
+            (item_id, kind, payload, datetime.now().isoformat()),
+        )
+
+    def list(self) -> list[OutboxItem]:
+        rows = self.db.connection.execute(
+            "SELECT * FROM sync_outbox ORDER BY created_at, item_id"
+        ).fetchall()
+        return [OutboxItem(
+            row["item_id"], row["kind"], row["payload"], datetime.fromisoformat(row["created_at"]),
+            row["attempts"], row["last_error"],
+        ) for row in rows]
+
+    def failed(self, item_id: str, error: str) -> None:
+        self._write(
+            "UPDATE sync_outbox SET attempts=attempts+1, last_error=? WHERE item_id=?",
+            (error[:500], item_id),
+        )
+
+    def delete(self, item_id: str) -> None:
+        self._write("DELETE FROM sync_outbox WHERE item_id=?", (item_id,))
+
 class Store:
     """One handle onto every repository."""
 
@@ -510,6 +555,7 @@ class Store:
         self.etag_events = ETagEventRepository(self.database)
         self.categories = CategoryRepository(self.database)
         self.settings = SettingsRepository(self.database)
+        self.outbox = OutboxRepository(self.database)
 
     def close(self) -> None:
         self.database.close()
