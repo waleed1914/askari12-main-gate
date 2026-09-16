@@ -159,7 +159,7 @@ def test_capture_persists_and_next_visitor_cannot_reuse_frame(qapp, tmp_path):
         assert exit_portal.evidence.minimumHeight() == 180
         exit_portal.clear()
         assert exit_portal.evidence.pixmap().isNull()
-        assert exit_portal.evidence.minimumHeight() == 0
+        assert exit_portal.evidence.minimumHeight() == 180
         exit_portal.close()
     finally:
         portal.close()

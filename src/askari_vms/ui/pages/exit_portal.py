@@ -295,20 +295,16 @@ class ExitPortalWindow(QWidget):
             self.detail_grid.setColumnStretch(column, 1)
         layout.addLayout(self.detail_grid)
 
-        self.evidence = QLabel(
-            "Entry photographs (driver, ANPR overview, plate crop, ID card) appear here "
-            "once the camera adapters are enabled, so the operator can compare faces."
+        driver_panel, self.evidence = self._entry_evidence_panel(
+            "Entry driver", "Entry driver photograph unavailable."
         )
-        self.evidence.setProperty("muted", "true")
-        self.evidence.setWordWrap(True)
-        self.evidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.anpr_evidence = QLabel("Entry ANPR photograph unavailable.")
-        self.anpr_evidence.setProperty("muted", "true")
-        self.anpr_evidence.setWordWrap(True)
-        self.anpr_evidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        anpr_panel, self.anpr_evidence = self._entry_evidence_panel(
+            "Entry ANPR", "Entry ANPR photograph unavailable."
+        )
         evidence_row = QHBoxLayout()
-        evidence_row.addWidget(self.evidence, 1)
-        evidence_row.addWidget(self.anpr_evidence, 1)
+        evidence_row.setSpacing(12)
+        evidence_row.addWidget(driver_panel, 1)
+        evidence_row.addWidget(anpr_panel, 1)
         layout.addLayout(evidence_row)
         layout.addStretch()
 
@@ -332,6 +328,25 @@ class ExitPortalWindow(QWidget):
         self.decision_note.setWordWrap(True)
         layout.addWidget(self.decision_note)
         return card
+
+    @staticmethod
+    def _entry_evidence_panel(title: str, empty_text: str) -> tuple[QFrame, QLabel]:
+        panel = QFrame()
+        panel.setObjectName("capturePanel")
+        box = QVBoxLayout(panel)
+        box.setContentsMargins(12, 10, 12, 12)
+        box.setSpacing(8)
+        heading = QLabel(title)
+        heading.setObjectName("captureTitle")
+        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview = QLabel(empty_text)
+        preview.setProperty("muted", "true")
+        preview.setWordWrap(True)
+        preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview.setMinimumHeight(180)
+        box.addWidget(heading)
+        box.addWidget(preview, 1)
+        return panel, preview
 
     def _capture_card(self) -> QFrame:
         card = QFrame()
@@ -484,23 +499,19 @@ class ExitPortalWindow(QWidget):
         if not photo.isNull():
             # Keep the entry evidence visible when the live-camera column asks
             # for more vertical space than the window currently has.
-            self.evidence.setMinimumHeight(180)
-            self.evidence.setPixmap(photo.scaled(360, 180, Qt.AspectRatioMode.KeepAspectRatio,
+            self.evidence.setPixmap(photo.scaled(420, 190, Qt.AspectRatioMode.KeepAspectRatio,
                                                 Qt.TransformationMode.SmoothTransformation))
             self.evidence.setToolTip("Driver photographed at entry")
         else:
-            self.evidence.setMinimumHeight(0)
             self.evidence.setText("Entry driver photo unavailable. Compare manually and record your decision.")
         anpr = QPixmap(visit.entry_anpr_image) if visit.entry_anpr_image else QPixmap()
         if not anpr.isNull():
-            self.anpr_evidence.setMinimumHeight(180)
             self.anpr_evidence.setPixmap(anpr.scaled(
-                360, 180, Qt.AspectRatioMode.KeepAspectRatio,
+                420, 190, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
             self.anpr_evidence.setToolTip("ANPR overview photographed at entry")
         else:
-            self.anpr_evidence.setMinimumHeight(0)
             self.anpr_evidence.setText("Entry ANPR photograph unavailable.")
         self._visit = visit
         self._decision = ""
@@ -745,11 +756,9 @@ class ExitPortalWindow(QWidget):
 
     def clear(self) -> None:
         self.evidence.clear()
-        self.evidence.setMinimumHeight(0)
         self.evidence.setText("Find a visit to view its entry driver photograph.")
         self.evidence.setToolTip("")
         self.anpr_evidence.clear()
-        self.anpr_evidence.setMinimumHeight(0)
         self.anpr_evidence.setText("Find a visit to view its Entry ANPR photograph.")
         self.anpr_evidence.setToolTip("")
         self._visit = None
