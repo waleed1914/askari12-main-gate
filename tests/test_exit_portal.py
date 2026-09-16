@@ -187,6 +187,28 @@ def test_a_lost_receipt_is_recorded_on_the_visit(portal) -> None:
     assert decision.severity.value == "Warning"
 
 
+def test_f1_matches_and_submits(portal) -> None:
+    portal.select(portal._visits[0])
+    closed = portal._decide_and_submit(DriverMatch.MATCHED)
+    assert closed is not None and closed.driver_match == DriverMatch.MATCHED
+
+
+def test_f2_mismatches_and_submits(portal) -> None:
+    portal.select(portal._visits[0])
+    closed = portal._decide_and_submit(DriverMatch.MISMATCHED)
+    assert closed is not None and closed.driver_match == DriverMatch.MISMATCHED
+
+
+def test_f3_marks_lost_but_never_invents_driver_match(portal) -> None:
+    portal.select(portal._visits[0])
+    assert portal._lost_receipt_and_submit() is None
+    assert portal.receipt_lost.isChecked()
+    assert "Matched or Mismatched" in portal.status.text()
+    portal.set_decision(DriverMatch.MATCHED)
+    closed = portal._lost_receipt_and_submit()
+    assert closed is not None and closed.receipt_lost
+
+
 def test_a_missed_exit_camera_is_recorded_but_does_not_block(portal) -> None:
     portal.search.setText("8F2A19C4")
     portal.lookup()

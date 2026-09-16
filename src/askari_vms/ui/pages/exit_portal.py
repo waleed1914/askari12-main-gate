@@ -49,8 +49,9 @@ from askari_vms.visits import (
 
 SUBMIT_KEY = "Ctrl+Return"
 CLEAR_KEY = "Ctrl+N"
-MATCH_KEY = "Ctrl+M"
-MISMATCH_KEY = "Ctrl+X"
+MATCH_KEY = "F1"
+MISMATCH_KEY = "F2"
+LOST_RECEIPT_KEY = "F3"
 
 HEADER_LOGO_SIZE = 40
 
@@ -385,8 +386,8 @@ class ExitPortalWindow(QWidget):
         row.addWidget(self.status, 1)
 
         shortcuts = QLabel(
-            f"<b>{MATCH_KEY}</b> matched   <b>{MISMATCH_KEY}</b> mismatched   "
-            f"<b>{SUBMIT_KEY}</b> submit and open   <b>{CLEAR_KEY}</b> next vehicle"
+            f"<b>{MATCH_KEY}</b> matched + open   <b>{MISMATCH_KEY}</b> mismatched + open   "
+            f"<b>{LOST_RECEIPT_KEY}</b> lost receipt + open   <b>{CLEAR_KEY}</b> next"
         )
         shortcuts.setObjectName("shortcutPanel")
         row.addWidget(shortcuts)
@@ -403,12 +404,27 @@ class ExitPortalWindow(QWidget):
         for key, slot in (
             (SUBMIT_KEY, self.submit), ("Ctrl+Enter", self.submit),
             (CLEAR_KEY, self.clear),
-            (MATCH_KEY, lambda: self.set_decision(DriverMatch.MATCHED)),
-            (MISMATCH_KEY, lambda: self.set_decision(DriverMatch.MISMATCHED)),
+            (MATCH_KEY, lambda: self._decide_and_submit(DriverMatch.MATCHED)),
+            (MISMATCH_KEY, lambda: self._decide_and_submit(DriverMatch.MISMATCHED)),
+            (LOST_RECEIPT_KEY, self._lost_receipt_and_submit),
         ):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(slot)
+
+    def _decide_and_submit(self, decision: str) -> VisitRecord | None:
+        self.set_decision(decision)
+        return self.submit()
+
+    def _lost_receipt_and_submit(self) -> VisitRecord | None:
+        self.receipt_lost.setChecked(True)
+        if not self._decision:
+            self.status.setText(
+                "Receipt marked lost. Select Matched or Mismatched before opening the gate."
+            )
+            self._update_decision_note()
+            return None
+        return self.submit()
 
     # ---------- finding the visit ----------
 
