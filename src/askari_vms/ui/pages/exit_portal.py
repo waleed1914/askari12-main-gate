@@ -110,6 +110,8 @@ class ExitPortalWindow(QWidget):
         self._gate_jobs: dict[Future, tuple[str, bool]] = {}
         self._gate_timer: QTimer | None = None
         self._driver_image = ""
+        self._exit_anpr_image = ""
+        self._exit_plate_image = ""
         self._driver_after = time.monotonic()
         self._driver_displayed_at = 0.0
         self._driver_available: bool | None = None
@@ -698,6 +700,49 @@ class ExitPortalWindow(QWidget):
         self._driver_image = str(path)
         self._captured["driver"] = True
 
+    def _capture_exit_anpr(self) -> None:
+        if self._anpr_camera is None or self._exit_anpr_image:
+            return
+        frame = self._anpr_camera.latest()
+        if not frame.fresh():
+            self._captured["anpr"] = False
+            return
+        image = QImage.fromData(frame.jpeg, "JPG")
+        try:
+            if image.isNull() or not self._image_directory:
+                raise OSError("No image or data directory")
+            folder = Path(self._image_directory) / "images" / "anpr_exit" / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{uuid4().hex}.jpg"
+            if not image.save(str(path), "JPG", 95):
+                raise OSError("Image write failed")
+        except OSError:
+            self._captured["anpr"] = False
+            return
+        self._exit_anpr_image = str(path)
+        self._captured["anpr"] = True
+        self._capture_exit_plate()
+
+    def _capture_exit_plate(self) -> None:
+        if self._anpr_feed is None or self._exit_plate_image:
+            return
+        getter = getattr(self._anpr_feed, "latest_plate_image", None)
+        data = getter() if getter is not None else b""
+        image = QImage.fromData(data, "JPG") if data else QImage()
+        try:
+            if image.isNull() or not self._image_directory:
+                raise OSError("No plate crop available")
+            folder = Path(self._image_directory) / "images" / "plate_exit" / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{uuid4().hex}.jpg"
+            if not image.save(str(path), "JPG", 95):
+                raise OSError("Image write failed")
+        except OSError:
+            self._captured["plate"] = False
+            return
+        self._exit_plate_image = str(path)
+        self._captured["plate"] = True
+
     def clear(self) -> None:
         self.evidence.clear()
         self.evidence.setMinimumHeight(0)
@@ -712,6 +757,8 @@ class ExitPortalWindow(QWidget):
         self._matches = []
         self._captured = {key: False for key in self._captured}
         self._driver_image = ""
+        self._exit_anpr_image = ""
+        self._exit_plate_image = ""
         self._driver_after = time.monotonic()
         self.search.clear()
         self.receipt_lost.setChecked(False)
@@ -803,8 +850,12 @@ class ExitPortalWindow(QWidget):
 
         if not self._captured["driver"]:
             self._capture_driver()
-        if self._driver_image:
-            self._visit = replace(self._visit, exit_driver_image=self._driver_image)
+        self._capture_exit_anpr()
+        self._capture_exit_plate()
+        self._visit = replace(
+            self._visit, exit_driver_image=self._driver_image,
+            exit_anpr_image=self._exit_anpr_image, exit_plate_image=self._exit_plate_image,
+        )
 
         closed = check_out(
             self._visit,

@@ -130,6 +130,22 @@ def test_exit_can_download_entry_anpr_image(tmp_path):
         thread.join(timeout=2)
 
 
+def test_exit_anpr_and_plate_uploads_are_stored_on_entry(tmp_path):
+    path = tmp_path / "server.sqlite3"
+    store = Store(path)
+    store.visits.save(VisitRecord("VIS-EXIT-IMG", "TOKEN", datetime.now(), "entry01"))
+    store.close()
+    server, thread, base = running_server(path)
+    try:
+        for endpoint in ("exit-anpr-image", "exit-plate-image"):
+            status, result = upload(base, f"/api/v1/visits/VIS-EXIT-IMG/{endpoint}",
+                                    b"\xff\xd8test-jpeg")
+            assert status == 200 and __import__("pathlib").Path(result["path"]).is_file()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_exit_etag_event_is_stored_centrally(tmp_path):
     path = tmp_path / "server.sqlite3"
     Store(path).close()

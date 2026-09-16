@@ -174,6 +174,13 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                 visit_id = unquote(self.path[len("/api/v1/visits/"):-len("/exit-driver-image")]).strip("/")
                 self._exit_image(visit_id)
                 return
+            for endpoint, folder in (("exit-anpr-image", "anpr_exit"),
+                                     ("exit-plate-image", "plate_exit")):
+                suffix = "/" + endpoint
+                if self.path.startswith("/api/v1/visits/") and self.path.endswith(suffix):
+                    visit_id = unquote(self.path[len("/api/v1/visits/"):-len(suffix)]).strip("/")
+                    self._exit_image(visit_id, folder)
+                    return
             body = self._body()
             if body is None:
                 return
@@ -215,7 +222,11 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                     driver_match=body["driver_match"], exit_time=stamp,
                     receipt_lost=bool(body.get("receipt_lost", False)),
                 )
-                closed = replace(closed, exit_driver_image=str(body.get("exit_driver_image", "")))
+                closed = replace(
+                    closed, exit_driver_image=str(body.get("exit_driver_image", "")),
+                    exit_anpr_image=str(body.get("exit_anpr_image", "")),
+                    exit_plate_image=str(body.get("exit_plate_image", "")),
+                )
                 store.visits.save(closed)
                 AuditLog(store.audit.list(), repository=store.audit).record(
                     action="Visitor decision", target=closed.visit_id,
@@ -228,7 +239,7 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
             finally:
                 store.close()
 
-        def _exit_image(self, visit_id: str) -> None:
+        def _exit_image(self, visit_id: str, image_folder: str = "driver_exit") -> None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
@@ -247,7 +258,7 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                     return
             finally:
                 store.close()
-            folder = Path(database_path).parent / "images" / "driver_exit" / datetime.now().strftime("%Y-%m-%d")
+            folder = Path(database_path).parent / "images" / image_folder / datetime.now().strftime("%Y-%m-%d")
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"{uuid4().hex}.jpg"
             path.write_bytes(data)

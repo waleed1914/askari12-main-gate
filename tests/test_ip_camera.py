@@ -85,6 +85,28 @@ def test_exit_driver_live_view_and_capture_are_persisted(qapp, tmp_path):
         store.close()
 
 
+def test_exit_anpr_overview_and_available_plate_crop_are_persisted(qapp, tmp_path):
+    camera = FakeFeed()
+    class PlateFeed:
+        def start(self): pass
+        def stop(self): pass
+        def drain(self): return [], (True, "connected")
+        def latest_plate_image(self): return jpeg()
+
+    visit = VisitRecord("V-EXIT-EVIDENCE", "TOKEN", datetime.now(), "entry01")
+    portal = ExitPortalWindow(visits=[visit], anpr_camera=camera, anpr_feed=PlateFeed(),
+                              image_directory=str(tmp_path))
+    try:
+        portal.select(visit)
+        portal.set_decision("Matched")
+        camera.frame = CameraFrame(jpeg(), time.monotonic(), "Live")
+        closed = portal.submit()
+        assert closed.exit_anpr_image and not QImage(closed.exit_anpr_image).isNull()
+        assert closed.exit_plate_image and not QImage(closed.exit_plate_image).isNull()
+    finally:
+        portal.close()
+
+
 def test_entry_portal_displays_the_anpr_live_snapshot(qapp):
     feed = FakeFeed()
     portal = EntryPortalWindow(anpr_camera=feed)

@@ -155,6 +155,8 @@ class ANPRFeed:
         self._status = (False, "Connecting to ANPR…")
         self._thread: Thread | None = None
         self._duplicates = PlateDeduplicator()
+        self._latest_plate_jpeg = b""
+        self._latest_plate_jpeg_at = 0.0
 
     def start(self) -> None:
         if self._thread is None:
@@ -173,6 +175,12 @@ class ANPRFeed:
     def _set_status(self, connected: bool, message: str) -> None:
         with self._lock:
             self._status = (connected, message)
+
+    def latest_plate_image(self, max_age: float = 10.0) -> bytes:
+        with self._lock:
+            if time.monotonic() - self._latest_plate_jpeg_at <= max_age:
+                return self._latest_plate_jpeg
+            return b""
 
     def _open(self):
         try:
@@ -202,6 +210,12 @@ class ANPRFeed:
                                 if self._duplicates.accept(reading):
                                     with self._lock:
                                         self._pending.append(reading)
+                        elif b"image/jpeg" in content_type and body.startswith(b"\xff\xd8"):
+                            # Dahua sends event-associated JPEG parts. Retain the newest
+                            # one as the plate crop; checkout remains valid if absent.
+                            with self._lock:
+                                self._latest_plate_jpeg = body
+                                self._latest_plate_jpeg_at = time.monotonic()
                     raise CameraError("ANPR disconnected. Retrying; manual entry is available.")
             except Exception as exc:
                 message = str(exc) if isinstance(exc, CameraError) else "ANPR unavailable. Retrying; type the plate manually."

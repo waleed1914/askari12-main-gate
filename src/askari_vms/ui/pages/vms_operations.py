@@ -161,22 +161,40 @@ class VisitDetailPage(QScrollArea):
 
     def _evidence_card(self) -> QFrame:
         card, grid = self._card("Captured evidence")
-        if self.visit.driver_image:
-            photo = QPixmap(self.visit.driver_image)
+        images = (
+            ("Entry driver", self.visit.driver_image),
+            ("Entry ANPR", self.visit.entry_anpr_image),
+            ("Exit driver", self.visit.exit_driver_image),
+            ("Exit ANPR", self.visit.exit_anpr_image),
+        )
+        shown = 0
+        for label, path in images:
+            photo = QPixmap(path) if path else QPixmap()
             if not photo.isNull():
                 preview = QLabel()
-                preview.setPixmap(photo.scaled(480, 240, Qt.AspectRatioMode.KeepAspectRatio,
+                preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                preview.setPixmap(photo.scaled(360, 200, Qt.AspectRatioMode.KeepAspectRatio,
                                                Qt.TransformationMode.SmoothTransformation))
-                grid.addWidget(QLabel("Entry driver photograph"), 1, 0, 1, 4)
-                grid.addWidget(preview, 2, 0, 1, 4)
-                return card
-        note = QLabel(
-            "Driver photo, ANPR overview, cropped plate and ID card image are captured for "
-            "every entry and exit. Images appear here once the camera adapters are enabled."
-        )
-        note.setProperty("muted", "true")
-        note.setWordWrap(True)
-        grid.addWidget(note, 1, 0, 1, 4)
+                column = (shown % 2) * 2
+                row = 1 + (shown // 2) * 2
+                grid.addWidget(QLabel(label + " photograph"), row, column, 1, 2)
+                grid.addWidget(preview, row + 1, column, 1, 2)
+                shown += 1
+        if self.visit.exit_plate_image:
+            plate = QPixmap(self.visit.exit_plate_image)
+            if not plate.isNull():
+                label = QLabel("Exit plate crop")
+                preview = QLabel()
+                preview.setPixmap(plate.scaled(360, 140, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation))
+                row = 1 + ((shown + 1) // 2) * 2
+                grid.addWidget(label, row, 0, 1, 2)
+                grid.addWidget(preview, row + 1, 0, 1, 2)
+                shown += 1
+        if not shown:
+            note = QLabel("No captured photographs are available for this transaction.")
+            note.setProperty("muted", "true")
+            grid.addWidget(note, 1, 0, 1, 4)
         return card
 
     def _history_card(self, history: Sequence[VisitRecord]) -> QFrame:

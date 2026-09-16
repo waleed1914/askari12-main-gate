@@ -122,16 +122,21 @@ class LanClient:
             "exit_operator": visit.exit_operator, "driver_match": visit.driver_match,
             "exit_time": visit.exit_time, "receipt_lost": visit.receipt_lost,
             "exit_driver_image": visit.exit_driver_image,
+            "exit_anpr_image": visit.exit_anpr_image,
+            "exit_plate_image": visit.exit_plate_image,
         })
 
     def upload_exit_driver_image(self, visit_id: str, path: str) -> str:
+        return self.upload_exit_image(visit_id, path, "exit-driver-image")
+
+    def upload_exit_image(self, visit_id: str, path: str, endpoint: str) -> str:
         try:
             token = self._token_provider(self.address)
             data = Path(path).read_bytes()
         except Exception:
             raise LanClientError("Exit driver image unavailable. Saved for automatic retry.") from None
         request = urllib.request.Request(
-            self.base + f"/api/v1/visits/{visit_id}/exit-driver-image", data=data, method="POST",
+            self.base + f"/api/v1/visits/{visit_id}/{endpoint}", data=data, method="POST",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "image/jpeg"},
         )
         try:
@@ -252,6 +257,16 @@ class ExitSyncService:
                             visit.visit_id, visit.exit_driver_image
                         )
                         visit = replace(visit, exit_driver_image=central_path)
+                    if visit.exit_anpr_image:
+                        central_path = self.client.upload_exit_image(
+                            visit.visit_id, visit.exit_anpr_image, "exit-anpr-image"
+                        )
+                        visit = replace(visit, exit_anpr_image=central_path)
+                    if visit.exit_plate_image:
+                        central_path = self.client.upload_exit_image(
+                            visit.visit_id, visit.exit_plate_image, "exit-plate-image"
+                        )
+                        visit = replace(visit, exit_plate_image=central_path)
                     self.client.checkout(visit)
                 elif item.kind == "etag_event":
                     data["timestamp"] = datetime.fromisoformat(data["timestamp"])

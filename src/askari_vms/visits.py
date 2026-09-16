@@ -51,6 +51,8 @@ class VisitRecord:
     driver_image: str = ""
     entry_anpr_image: str = ""
     exit_driver_image: str = ""
+    exit_anpr_image: str = ""
+    exit_plate_image: str = ""
     exit_time: datetime | None = None
     exit_operator: str = ""
     exit_door: str = ""

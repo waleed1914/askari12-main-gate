@@ -24,6 +24,9 @@ class RecoveringClient:
             raise LanClientError("offline")
         self.checkouts.append(visit)
 
+    def upload_exit_image(self, visit_id, path, endpoint):
+        return f"central/{endpoint}.jpg"
+
     def download_entry_driver_image(self, visit_id):
         return b"\xff\xd8photo", "image/jpeg"
 
