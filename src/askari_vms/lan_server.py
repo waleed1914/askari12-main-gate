@@ -138,9 +138,15 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                 ).strip("/")
                 self._entry_image(visit_id)
                 return
+            if self.path.startswith("/api/v1/visits/") and self.path.endswith("/entry-anpr-image"):
+                visit_id = unquote(
+                    self.path[len("/api/v1/visits/"):-len("/entry-anpr-image")]
+                ).strip("/")
+                self._entry_image(visit_id, "entry_anpr_image")
+                return
             self._reply(404, {"error": "not_found"})
 
-        def _entry_image(self, visit_id: str) -> None:
+        def _entry_image(self, visit_id: str, field: str = "driver_image") -> None:
             store = Store(database_path)
             try:
                 visit = next((item for item in store.visits.list() if item.visit_id == visit_id), None)
@@ -149,7 +155,8 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
             if visit is None:
                 self._reply(404, {"error": "visit_not_found"})
                 return
-            path = Path(visit.driver_image) if visit.driver_image else None
+            value = getattr(visit, field, "")
+            path = Path(value) if value else None
             try:
                 data = path.read_bytes() if path is not None else b""
             except OSError:

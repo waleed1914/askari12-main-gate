@@ -91,12 +91,18 @@ class LanClient:
         return [visit_from_dict(item) for item in self._request("/api/v1/visits/open")["visits"]]
 
     def download_entry_driver_image(self, visit_id: str) -> tuple[bytes, str]:
+        return self._download_entry_image(visit_id, "entry-driver-image")
+
+    def download_entry_anpr_image(self, visit_id: str) -> tuple[bytes, str]:
+        return self._download_entry_image(visit_id, "entry-anpr-image")
+
+    def _download_entry_image(self, visit_id: str, endpoint: str) -> tuple[bytes, str]:
         try:
             token = self._token_provider(self.address)
         except Exception:
             raise LanClientError("Entry server credential unavailable.") from None
         request = urllib.request.Request(
-            self.base + f"/api/v1/visits/{visit_id}/entry-driver-image",
+            self.base + f"/api/v1/visits/{visit_id}/{endpoint}",
             headers={"Authorization": f"Bearer {token}"},
         )
         try:
@@ -205,20 +211,30 @@ class ExitSyncService:
         folder = Path(self.database_path).parent / "images" / "entry_from_server"
         result = []
         for visit in visits:
-            if not visit.driver_image:
-                result.append(visit)
-                continue
-            existing = next((p for p in (folder / f"{visit.visit_id}.jpg",
-                                          folder / f"{visit.visit_id}.png") if p.is_file()), None)
-            if existing is None:
-                data, content_type = self.client.download_entry_driver_image(visit.visit_id)
-                if data:
-                    folder.mkdir(parents=True, exist_ok=True)
-                    suffix = ".png" if content_type == "image/png" else ".jpg"
-                    existing = folder / f"{visit.visit_id}{suffix}"
-                    existing.write_bytes(data)
-            result.append(replace(visit, driver_image=str(existing) if existing else ""))
+            existing = self._cache_one_entry_image(
+                folder, visit.visit_id, "driver", visit.driver_image,
+                self.client.download_entry_driver_image,
+            )
+            anpr = self._cache_one_entry_image(folder, visit.visit_id, "anpr", visit.entry_anpr_image,
+                                               self.client.download_entry_anpr_image)
+            result.append(replace(visit, driver_image=str(existing) if existing else "",
+                                  entry_anpr_image=str(anpr) if anpr else ""))
         return result
+
+    @staticmethod
+    def _cache_one_entry_image(folder: Path, visit_id: str, label: str, remote_path: str, downloader):
+        if not remote_path:
+            return None
+        existing = next((p for p in (folder / f"{visit_id}-{label}.jpg",
+                                      folder / f"{visit_id}-{label}.png") if p.is_file()), None)
+        if existing is None:
+            data, content_type = downloader(visit_id)
+            if data:
+                folder.mkdir(parents=True, exist_ok=True)
+                suffix = ".png" if content_type == "image/png" else ".jpg"
+                existing = folder / f"{visit_id}-{label}{suffix}"
+                existing.write_bytes(data)
+        return existing
 
     def _flush(self) -> None:
         store = Store(self.database_path)

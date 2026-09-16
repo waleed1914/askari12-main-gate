@@ -284,7 +284,14 @@ class ExitPortalWindow(QWidget):
         self.evidence.setProperty("muted", "true")
         self.evidence.setWordWrap(True)
         self.evidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.evidence)
+        self.anpr_evidence = QLabel("Entry ANPR photograph unavailable.")
+        self.anpr_evidence.setProperty("muted", "true")
+        self.anpr_evidence.setWordWrap(True)
+        self.anpr_evidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        evidence_row = QHBoxLayout()
+        evidence_row.addWidget(self.evidence, 1)
+        evidence_row.addWidget(self.anpr_evidence, 1)
+        layout.addLayout(evidence_row)
         layout.addStretch()
 
         decision_row = QHBoxLayout()
@@ -451,6 +458,17 @@ class ExitPortalWindow(QWidget):
         else:
             self.evidence.setMinimumHeight(0)
             self.evidence.setText("Entry driver photo unavailable. Compare manually and record your decision.")
+        anpr = QPixmap(visit.entry_anpr_image) if visit.entry_anpr_image else QPixmap()
+        if not anpr.isNull():
+            self.anpr_evidence.setMinimumHeight(180)
+            self.anpr_evidence.setPixmap(anpr.scaled(
+                360, 180, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+            self.anpr_evidence.setToolTip("ANPR overview photographed at entry")
+        else:
+            self.anpr_evidence.setMinimumHeight(0)
+            self.anpr_evidence.setText("Entry ANPR photograph unavailable.")
         self._visit = visit
         self._decision = ""
         self.visit_heading.setText(
@@ -654,6 +672,10 @@ class ExitPortalWindow(QWidget):
         self.evidence.setMinimumHeight(0)
         self.evidence.setText("Find a visit to view its entry driver photograph.")
         self.evidence.setToolTip("")
+        self.anpr_evidence.clear()
+        self.anpr_evidence.setMinimumHeight(0)
+        self.anpr_evidence.setText("Find a visit to view its Entry ANPR photograph.")
+        self.anpr_evidence.setToolTip("")
         self._visit = None
         self._decision = ""
         self._matches = []

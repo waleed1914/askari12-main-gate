@@ -98,6 +98,19 @@ def test_entry_portal_displays_the_anpr_live_snapshot(qapp):
     assert feed.stopped
 
 
+def test_entry_submit_persists_anpr_overview(qapp, tmp_path):
+    feed = FakeFeed()
+    portal = EntryPortalWindow(anpr_camera=feed, image_directory=str(tmp_path))
+    try:
+        time.sleep(0.02)
+        feed.frame = CameraFrame(jpeg(), time.monotonic(), "Live ANPR camera")
+        visit = portal.submit()
+        assert visit.entry_anpr_image
+        assert not QImage(visit.entry_anpr_image).isNull()
+    finally:
+        portal.close()
+
+
 def test_capture_persists_and_next_visitor_cannot_reuse_frame(qapp, tmp_path):
     feed = FakeFeed()
     store = Store(tmp_path / "visits.sqlite3")

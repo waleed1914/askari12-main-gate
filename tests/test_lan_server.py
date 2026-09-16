@@ -113,6 +113,23 @@ def test_exit_can_download_entry_driver_image(tmp_path):
         thread.join(timeout=2)
 
 
+def test_exit_can_download_entry_anpr_image(tmp_path):
+    path = tmp_path / "server.sqlite3"
+    image_path = tmp_path / "anpr.jpg"
+    image_path.write_bytes(b"\xff\xd8anpr-photo")
+    store = Store(path)
+    store.visits.save(VisitRecord("VIS-ANPR", "TOKEN", datetime.now(), "entry01",
+                                  entry_anpr_image=str(image_path)))
+    store.close()
+    server, thread, base = running_server(path)
+    try:
+        status, body, _ = download(base, "/api/v1/visits/VIS-ANPR/entry-anpr-image")
+        assert status == 200 and body == image_path.read_bytes()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_exit_etag_event_is_stored_centrally(tmp_path):
     path = tmp_path / "server.sqlite3"
     Store(path).close()

@@ -269,6 +269,7 @@ class EntryPortalWindow(QWidget):
         self._last_anpr_plate = ""
         self._image_directory = image_directory
         self._driver_image = ""
+        self._entry_anpr_image = ""
         self._driver_after = time.monotonic()
         self._driver_displayed_at = 0.0
         self._driver_available: bool | None = None
@@ -440,6 +441,28 @@ class EntryPortalWindow(QWidget):
         self._driver_image = str(path)
         self._captured["driver"] = True
         self._streams["driver"].set_state("Driver photo saved for this visitor", live=True)
+
+    def _capture_anpr_overview(self) -> None:
+        if self._anpr_camera is None or self._entry_anpr_image:
+            return
+        frame = self._anpr_camera.latest()
+        if not frame.fresh(self._anpr_after):
+            self._captured["anpr"] = False
+            return
+        image = QImage.fromData(frame.jpeg, "JPG")
+        try:
+            if image.isNull() or not self._image_directory:
+                raise OSError("No image or data directory")
+            folder = Path(self._image_directory) / "images" / "anpr_entry" / datetime.now().strftime("%Y-%m-%d")
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{uuid4().hex}.jpg"
+            if not image.save(str(path), "JPG", 95):
+                raise OSError("Image write failed")
+        except OSError:
+            self._captured["anpr"] = False
+            return
+        self._entry_anpr_image = str(path)
+        self._captured["anpr"] = True
 
     # ---------- construction ----------
 
@@ -1248,6 +1271,7 @@ class EntryPortalWindow(QWidget):
         self._dictating = False
         self._cnic_image = ""
         self._driver_image = ""
+        self._entry_anpr_image = ""
         self._driver_after = time.monotonic()
         self._captured = {key: False for key in self._captured}
         self.cnic_panel.set_state("No feed")
@@ -1348,11 +1372,13 @@ class EntryPortalWindow(QWidget):
             cnic_expiry_date=self.fields["cnic_expiry_date"].text().strip(),
             cnic_image=self._cnic_image,
             driver_image=self._driver_image,
+            entry_anpr_image=self._entry_anpr_image,
         ).normalized()
 
     def submit(self) -> VisitRecord:
         """Record the visit, print the receipt, open the gate. Never refuses."""
         self._capture_driver()
+        self._capture_anpr_overview()
         visit = self.build_visit()
         self._visits.insert(0, visit)
 

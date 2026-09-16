@@ -27,6 +27,9 @@ class RecoveringClient:
     def download_entry_driver_image(self, visit_id):
         return b"\xff\xd8photo", "image/jpeg"
 
+    def download_entry_anpr_image(self, visit_id):
+        return b"\xff\xd8anpr", "image/jpeg"
+
     def etag_event(self, event):
         if not self.online:
             raise LanClientError("offline")
@@ -98,10 +101,12 @@ def test_sync_caches_entry_photo_for_exit_ui(tmp_path):
     path = tmp_path / "exit.sqlite3"
     Store(path).close()
     visit = VisitRecord("VIS-IMG", "TOKEN", datetime.now(), "entry01",
-                        driver_image=r"C:\AskariVMS\data\images\driver_entry\remote.jpg")
+                        driver_image=r"C:\AskariVMS\data\images\driver_entry\remote.jpg",
+                        entry_anpr_image=r"C:\AskariVMS\data\images\anpr_entry\remote.jpg")
     client = RecoveringClient([visit])
     client.online = True
     sync = ExitSyncService(path, client)
     [cached_visit] = sync._cache_entry_images([visit])
     cached = __import__("pathlib").Path(cached_visit.driver_image)
     assert cached.read_bytes() == b"\xff\xd8photo"
+    assert __import__("pathlib").Path(cached_visit.entry_anpr_image).read_bytes() == b"\xff\xd8anpr"
