@@ -283,6 +283,7 @@ class ExitPortalWindow(QWidget):
         )
         self.evidence.setProperty("muted", "true")
         self.evidence.setWordWrap(True)
+        self.evidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.evidence)
         layout.addStretch()
 
@@ -441,10 +442,14 @@ class ExitPortalWindow(QWidget):
         self.evidence.clear()
         photo = QPixmap(visit.driver_image) if visit.driver_image else QPixmap()
         if not photo.isNull():
+            # Keep the entry evidence visible when the live-camera column asks
+            # for more vertical space than the window currently has.
+            self.evidence.setMinimumHeight(180)
             self.evidence.setPixmap(photo.scaled(360, 180, Qt.AspectRatioMode.KeepAspectRatio,
                                                 Qt.TransformationMode.SmoothTransformation))
             self.evidence.setToolTip("Driver photographed at entry")
         else:
+            self.evidence.setMinimumHeight(0)
             self.evidence.setText("Entry driver photo unavailable. Compare manually and record your decision.")
         self._visit = visit
         self._decision = ""
@@ -646,6 +651,7 @@ class ExitPortalWindow(QWidget):
 
     def clear(self) -> None:
         self.evidence.clear()
+        self.evidence.setMinimumHeight(0)
         self.evidence.setText("Find a visit to view its entry driver photograph.")
         self.evidence.setToolTip("")
         self._visit = None
