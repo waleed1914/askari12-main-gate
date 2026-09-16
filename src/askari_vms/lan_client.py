@@ -90,6 +90,27 @@ class LanClient:
     def open_visits(self) -> list[VisitRecord]:
         return [visit_from_dict(item) for item in self._request("/api/v1/visits/open")["visits"]]
 
+    def download_entry_driver_image(self, visit_id: str) -> tuple[bytes, str]:
+        try:
+            token = self._token_provider(self.address)
+        except Exception:
+            raise LanClientError("Entry server credential unavailable.") from None
+        request = urllib.request.Request(
+            self.base + f"/api/v1/visits/{visit_id}/entry-driver-image",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                request, timeout=max(self.timeout, 5)
+            ) as response:
+                return response.read(), response.headers.get_content_type()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return b"", ""
+            raise LanClientError(f"Entry server rejected image request (HTTP {exc.code}).") from None
+        except Exception:
+            raise LanClientError("Entry driver image unavailable. Retrying automatically.") from None
+
     def checkout(self, visit: VisitRecord) -> None:
         self._request(f"/api/v1/visits/{visit.visit_id}/checkout", {
             "exit_operator": visit.exit_operator, "driver_match": visit.driver_match,
@@ -168,7 +189,7 @@ class ExitSyncService:
             connected = False
             message = "Entry server unavailable — transactions will retry automatically."
             try:
-                visits = self.client.open_visits()
+                visits = self._cache_entry_images(self.client.open_visits())
                 with self._lock:
                     self._visits = visits
                 self._flush()
@@ -179,6 +200,25 @@ class ExitSyncService:
                 self._status = (connected, message)
             self._wake.wait(2.0)
             self._wake.clear()
+
+    def _cache_entry_images(self, visits: list[VisitRecord]) -> list[VisitRecord]:
+        folder = Path(self.database_path).parent / "images" / "entry_from_server"
+        result = []
+        for visit in visits:
+            if not visit.driver_image:
+                result.append(visit)
+                continue
+            existing = next((p for p in (folder / f"{visit.visit_id}.jpg",
+                                          folder / f"{visit.visit_id}.png") if p.is_file()), None)
+            if existing is None:
+                data, content_type = self.client.download_entry_driver_image(visit.visit_id)
+                if data:
+                    folder.mkdir(parents=True, exist_ok=True)
+                    suffix = ".png" if content_type == "image/png" else ".jpg"
+                    existing = folder / f"{visit.visit_id}{suffix}"
+                    existing.write_bytes(data)
+            result.append(replace(visit, driver_image=str(existing) if existing else ""))
+        return result
 
     def _flush(self) -> None:
         store = Store(self.database_path)

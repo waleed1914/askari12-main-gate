@@ -29,6 +29,12 @@ def upload(base, path, data):
         return response.status, json.load(response)
 
 
+def download(base, path):
+    req = urllib.request.Request(base + path, headers={"Authorization": "Bearer test-token"})
+    with urllib.request.urlopen(req, timeout=2) as response:
+        return response.status, response.read(), response.headers.get_content_type()
+
+
 def running_server(path):
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0), handler_factory(path, "test-token", {"127.0.0.1"})
@@ -84,6 +90,27 @@ def test_open_visits_and_checkout_write_the_entry_database(tmp_path):
         assert any(event.target == visit.visit_id for event in store.audit.list())
     finally:
         store.close()
+
+
+def test_exit_can_download_entry_driver_image(tmp_path):
+    path = tmp_path / "server.sqlite3"
+    image_path = tmp_path / "entry.jpg"
+    image_path.write_bytes(b"\xff\xd8entry-photo")
+    store = Store(path)
+    visit = VisitRecord("VIS-IMG", "TOKEN", datetime.now(), "entry01",
+                        driver_image=str(image_path))
+    store.visits.save(visit)
+    store.close()
+    server, thread, base = running_server(path)
+    try:
+        status, body, content_type = download(
+            base, "/api/v1/visits/VIS-IMG/entry-driver-image"
+        )
+        assert status == 200 and body == image_path.read_bytes()
+        assert content_type == "image/jpeg"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
 
 
 def test_exit_etag_event_is_stored_centrally(tmp_path):

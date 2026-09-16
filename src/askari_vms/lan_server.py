@@ -81,6 +81,14 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
             self.end_headers()
             self.wfile.write(body)
 
+        def _reply_bytes(self, status: int, body: bytes, content_type: str) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "private, no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def _authorized(self) -> bool:
             if self.client_address[0] not in allowed_clients:
                 self._reply(403, {"error": "client_not_allowed"})
@@ -124,7 +132,33 @@ def handler_factory(database_path: str | Path, token: str, allowed_clients: set[
                     store.close()
                 self._reply(200, {"visits": rows})
                 return
+            if self.path.startswith("/api/v1/visits/") and self.path.endswith("/entry-driver-image"):
+                visit_id = unquote(
+                    self.path[len("/api/v1/visits/"):-len("/entry-driver-image")]
+                ).strip("/")
+                self._entry_image(visit_id)
+                return
             self._reply(404, {"error": "not_found"})
+
+        def _entry_image(self, visit_id: str) -> None:
+            store = Store(database_path)
+            try:
+                visit = next((item for item in store.visits.list() if item.visit_id == visit_id), None)
+            finally:
+                store.close()
+            if visit is None:
+                self._reply(404, {"error": "visit_not_found"})
+                return
+            path = Path(visit.driver_image) if visit.driver_image else None
+            try:
+                data = path.read_bytes() if path is not None else b""
+            except OSError:
+                data = b""
+            if not data:
+                self._reply(404, {"error": "entry_driver_image_not_found"})
+                return
+            content_type = "image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
+            self._reply_bytes(200, data, content_type)
 
         def do_POST(self) -> None:
             if not self._authorized():

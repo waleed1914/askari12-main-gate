@@ -24,6 +24,9 @@ class RecoveringClient:
             raise LanClientError("offline")
         self.checkouts.append(visit)
 
+    def download_entry_driver_image(self, visit_id):
+        return b"\xff\xd8photo", "image/jpeg"
+
     def etag_event(self, event):
         if not self.online:
             raise LanClientError("offline")
@@ -89,3 +92,16 @@ def test_lan_client_never_uses_an_internet_proxy(monkeypatch):
     except LanClientError:
         pass
     assert captured == ["http://192.168.1.40:8765/api/v1/visits/open"]
+
+
+def test_sync_caches_entry_photo_for_exit_ui(tmp_path):
+    path = tmp_path / "exit.sqlite3"
+    Store(path).close()
+    visit = VisitRecord("VIS-IMG", "TOKEN", datetime.now(), "entry01",
+                        driver_image=r"C:\AskariVMS\data\images\driver_entry\remote.jpg")
+    client = RecoveringClient([visit])
+    client.online = True
+    sync = ExitSyncService(path, client)
+    [cached_visit] = sync._cache_entry_images([visit])
+    cached = __import__("pathlib").Path(cached_visit.driver_image)
+    assert cached.read_bytes() == b"\xff\xd8photo"
