@@ -120,7 +120,7 @@ def test_exit_assignment_uses_confirmed_camera_and_http_port():
     feed = exit_anpr_feed(default_settings())
     assert feed is not None
     assert feed.address == "192.168.1.12"
-    assert feed.base == "http://192.168.1.12:84"
+    assert feed.base == "http://192.168.1.12:80"
 
 
 def test_subscription_recovers_and_errors_do_not_expose_credentials(monkeypatch):

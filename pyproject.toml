@@ -24,6 +24,7 @@ dev = ["pytest>=8.3,<9"]
 
 [project.scripts]
 askari-vms-admin = "askari_vms.main:main"
+askari-vms-server = "askari_vms.lan_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -122,18 +122,21 @@ class ControllerEventClient:
 
 
 class ControllerEventFeed:
-    def __init__(self, client: ControllerEventClient, last_event_id: int = 0) -> None:
+    def __init__(self, client: ControllerEventClient, last_event_id: int = 0,
+                 label: str = "Entry") -> None:
         self.client = client
+        self.label = label
         self._last_id = last_event_id
         self._stop = Event()
         self._lock = Lock()
         self._readings: list[ControllerReading] = []
         self._status = (False, "Connecting to Entry e-tag reader…")
+        self._status = (False, f"Connecting to {label} e-tag reader…")
         self._thread: Thread | None = None
 
     def start(self) -> None:
         if self._thread is None:
-            self._thread = Thread(target=self._run, daemon=True, name="entry-controller-events")
+            self._thread = Thread(target=self._run, daemon=True, name=f"{self.label.casefold()}-controller-events")
             self._thread.start()
 
     def stop(self) -> None:
@@ -155,7 +158,7 @@ class ControllerEventFeed:
                 with self._lock:
                     self._readings.extend(new)
                     self._readings = self._readings[-500:]
-                    self._status = (True, "Entry e-tag reader connected")
+                    self._status = (True, f"{self.label} e-tag reader connected")
                 failures = 0
                 delay = 0.5
             except Exception as exc:
@@ -178,4 +181,16 @@ def entry_event_feed(settings: AppSettings, last_event_id: int = 0) -> Controlle
     return ControllerEventFeed(
         ControllerEventClient(controller.key, controller.ip_address, controller.port),
         last_event_id,
+    )
+
+
+def exit_event_feed(settings: AppSettings, last_event_id: int = 0) -> ControllerEventFeed | None:
+    controller = next(
+        (item for item in settings.controllers if item.key == "exit" and item.configured), None,
+    )
+    if controller is None:
+        return None
+    return ControllerEventFeed(
+        ControllerEventClient(controller.key, controller.ip_address, controller.port),
+        last_event_id, "Exit",
     )

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from askari_vms.audit import AuditLog, AuditSeverity, sample_audit_events
 from askari_vms.auth import Session
 from askari_vms.cnic_ocr import LocalCNICReader
-from askari_vms.controller_events import entry_event_feed
+from askari_vms.controller_events import entry_event_feed, exit_event_feed
 from askari_vms.gate_controller import entry_gate_controller
 from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_anpr_snapshot_feed, exit_driver_feed
 from askari_vms.printing import DirectUsbPrinter
@@ -328,6 +328,9 @@ class AdminWindow(QMainWindow):
             anpr_camera=exit_anpr_snapshot_feed(self.settings),
             anpr_feed=exit_anpr_feed(self.settings),
             image_directory=self.settings.storage.data_directory,
+            events=self.store.etag_events.list(), etags=self.store.etags.list(),
+            controller_event_feed=exit_event_feed(self.settings),
+            on_etag_event=self._etag_event_received,
         )
         self.exit_portal = portal
         portal.show()

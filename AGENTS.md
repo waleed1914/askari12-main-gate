@@ -82,9 +82,16 @@ missed cameras submit and are listed too; both raise the event to WARNING. A pla
 an open visit warns and still allows. A returning vehicle or CNIC is *offered* for reuse
 and never auto-filled — photographs are always taken fresh.
 
+**Central LAN service:** `lan_server.py` runs separately on Entry `192.168.1.40:8765`.
+It is authenticated by a random Windows Credential Manager token, restricts clients to
+Exit `192.168.1.34`, and exposes health, open visits, checkout and Exit e-tag ingestion.
+Only Entry opens the WAL database. `scripts/install_entry_server.ps1` installs its
+restricted firewall rule and per-user auto-restarting logon task. The Exit client and
+offline retry queue are the next step and are not wired yet.
+
 **Not built yet:** the Dashboard (still four zeroed cards), controller card
-synchronization, and Exit ANPR evidence-image persistence. Visitor Exit physical
-control is not integrated yet.
+synchronization, Exit ANPR evidence-image persistence, and Exit LAN client. Visitor
+Exit physical control is not integrated yet.
 
 Stack: Python 3.12 + PySide6 (Qt6), `pytest`. Entry point `python -m askari_vms`.
 
@@ -102,11 +109,11 @@ the shape to follow: the page never talks to a controller, it is handed a readin
 | Controller | Door 1 | Door 2 |
 |---|---|---|
 | **Entry** | E-tag Entry | Visitor Entry |
-| **Exit** | Visitor Exit | E-tag Exit |
+| **Exit** | E-tag Exit | Visitor Exit |
 
-These four names are exact and confirmed. Entry unit: `192.168.1.10` (the second is
-not yet configured). The Entry door order was physically confirmed on 2026-09-14 and
-supersedes the earlier reversed assumption. Board also exposes fire alarm, Exit1/2 buttons, Sensor1/2,
+These four names are exact and confirmed. Entry unit: `192.168.1.10`; Exit unit:
+`192.168.1.11`. Entry and Exit both use Door 1 for e-tag and Door 2 for visitors. The
+physical order supersedes earlier reversed assumptions. Each board also exposes fire alarm, Exit1/2 buttons, Sensor1/2,
 tamper and reset inputs, an RS-485 long-range reader, and MQTT.
 
 ### Cameras — visitor lanes only
@@ -124,7 +131,7 @@ Manager, scoped by the configured camera key and address.
 Camera keys are durable identifiers, not lane assignments: `.13` retains its legacy
 `anpr_exit` key but is assigned to Entry (SDK 37778, HTTP 80). `.12` retains its legacy
 `anpr_entry` key but was physically confirmed as Visitor Exit on 2026-09-15 (SDK 37777,
-HTTP 84). Both use `/cgi-bin/snapshot.cgi` plus the TrafficJunction subscription. The
+HTTP 80). Both use `/cgi-bin/snapshot.cgi` plus the TrafficJunction subscription. The
 factory selects by role and lane, never by these historical keys.
 The ANPR panel currently reports detection status; plate detection does not claim to
 capture an overview or cropped-plate image. Integration was checked against the
@@ -155,7 +162,7 @@ stale frames and image write failures flag missing evidence and still allow subm
 Entry ANPR detection is also integrated as described above. The Exit driver camera at
 `192.168.1.17` uses the same authenticated Hikvision snapshot endpoint; its live view
 runs outside Qt and Capture/Submit saves a fresh image under
-`data/images/driver_exit/YYYY-MM-DD`. Exit ANPR `.12:84` now has an authenticated live
+`data/images/driver_exit/YYYY-MM-DD`. Exit ANPR `.12:80` now has an authenticated live
 snapshot view and TrafficJunction detection; recognized plates automatically open the
 matching active visit. Visitor Exit gate commands remain simulated.
 
@@ -273,7 +280,7 @@ returns HTTP 200. Its exact response is JSON text following a `#GEvent` comment 
 an XML `<response>` wrapper; for example it carries `ID`, `Reader`, `Door`, `Card`,
 `Name`, `Note`, `Time`, `SysTime`, `IsTwo`, `OutPut`, `InPut` and `Lock`.
 `controller_events.py` accepts this confirmed JSON-in-XML format as well as ordinary
-XML fields, polls at 500 ms outside Qt, reconnects with
+XML fields, polls both Entry (`.10`) and Exit (`.11`) at 500 ms outside Qt, reconnects with
 backoff, deduplicates by controller event ID and shares the controller's Windows
 credential. Entry accepts only physical Door 1 as E-tag Entry; Door 2 card activity is
 not misclassified as an e-tag. Readings are classified against the local registry,
@@ -282,9 +289,11 @@ The long-range field can report the same tag repeatedly while one vehicle passes
 Readings for the same tag, e-tag door and direction within five minutes are one passage:
 the single stored/displayed row moves to the latest read time and an unknown tag raises
 only one CRITICAL audit alert. The same tag after five quiet minutes is a new passage.
-When the Entry portal is opened from Admin, its event callback updates SQLite, the
-already-open E-Tag Logs page and Dashboard data together; E-Tag Logs must never require
-an application restart or page reconstruction to show a new controller read.
+Entry accepts Door 1 as E-tag Entry and Exit accepts Door 1 as E-tag Exit; Door 2 on
+either controller belongs to VMS and is ignored by the e-tag feed. Both portals persist
+readings. When a portal is opened from Admin, its callback updates SQLite, the already-open
+E-Tag Logs page and Dashboard data together; E-Tag Logs must never require an application
+restart or page reconstruction to show a new controller read.
 
 **Card management** — one card per numbered slot:
 
@@ -517,7 +526,7 @@ Audit events now carry the signed-in operator and workstation. The `system` /
   thermal paper, not the ESC/POS payload or printer adapter.
 - Verify several real registered and invalid card reads appear in the Entry portal and
   retain the controller's event ID and timestamp.
-- Second controller's IP is unassigned.
+- Exit controller is `192.168.1.11`: Door 1 E-tag Exit, Door 2 Visitor Exit.
 - Entry driver camera confirmed by the user on 2026-09-09: `http://192.168.1.16/`.
   This supersedes the earlier ConfigTool scan address `.14` for Visitor Entry.
 - Camera lane assignment: ANPR .13 / driver .16 on Visitor Entry; ANPR .12 / driver

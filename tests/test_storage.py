@@ -227,7 +227,7 @@ def test_existing_settings_gain_the_confirmed_anpr_map(tmp_path) -> None:
         migrated = second.settings.load()
         exit_anpr = next(camera for camera in migrated.cameras if camera.ip_address == "192.168.1.12")
         entry_anpr = next(camera for camera in migrated.cameras if camera.ip_address == "192.168.1.13")
-        assert (exit_anpr.lane, exit_anpr.port, exit_anpr.http_port) == ("Visitor Exit", 37777, 84)
+        assert (exit_anpr.lane, exit_anpr.port, exit_anpr.http_port) == ("Visitor Exit", 37777, 80)
         assert exit_anpr.snapshot_path == "/cgi-bin/snapshot.cgi"
         assert (entry_anpr.lane, entry_anpr.port, entry_anpr.http_port) == ("Visitor Entry", 37778, 80)
     finally:

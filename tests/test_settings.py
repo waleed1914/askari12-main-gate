@@ -24,15 +24,15 @@ def test_defaults_match_the_surveyed_hardware() -> None:
     settings = default_settings()
     entry, exit_controller = settings.controllers
     assert entry.ip_address == "192.168.1.10"
-    assert entry.configured and not exit_controller.configured
-    assert describe_controller(exit_controller) == "Not configured"
+    assert entry.configured and exit_controller.configured
+    assert exit_controller.ip_address == "192.168.1.11"
 
     assert len(settings.cameras) == 4
     assert {camera.role for camera in settings.cameras} == {ANPR, "Driver"}
     assert next(camera for camera in settings.cameras if camera.key == "driver_entry").snapshot_path == "/ISAPI/Streaming/channels/101/picture"
     assert all(camera.port == 8000 for camera in settings.cameras if camera.role == "Driver")
     assert {(camera.ip_address, camera.port, camera.http_port) for camera in settings.cameras if camera.role == ANPR} == {
-        ("192.168.1.12", 37777, 84), ("192.168.1.13", 37778, 80),
+        ("192.168.1.12", 37777, 80), ("192.168.1.13", 37778, 80),
     }
     # Every visitor lane is covered; e-tag lanes are deliberately absent.
     assert {camera.lane for camera in settings.cameras} == {VISITOR_ENTRY, VISITOR_EXIT}

@@ -21,3 +21,5 @@ def isolate_live_camera(monkeypatch):
     monkeypatch.setattr("askari_vms.main.entry_anpr_feed", lambda settings: None)
     monkeypatch.setattr("askari_vms.ui.admin_window.exit_anpr_feed", lambda settings: None)
     monkeypatch.setattr("askari_vms.main.exit_anpr_feed", lambda settings: None)
+    monkeypatch.setattr("askari_vms.ui.admin_window.exit_event_feed", lambda settings: None)
+    monkeypatch.setattr("askari_vms.main.exit_event_feed", lambda settings: None)

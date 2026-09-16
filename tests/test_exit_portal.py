@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 import pytest
 
 from askari_vms.audit import AuditLog
+from askari_vms.controller_events import ControllerReading
+from askari_vms.etag_events import OUT
 from askari_vms.auth import start_session
 from askari_vms.users import UserAccount, UserRole
 from askari_vms.visits import (
@@ -12,8 +14,25 @@ from askari_vms.visits import (
     find_open_visit,
     search_open_visits,
 )
+from askari_vms.ui.pages.exit_portal import ExitPortalWindow
 
 NOW = datetime(2026, 9, 4, 15, 0, 0)
+
+
+def test_exit_controller_records_only_door_one_etag_events(qapp):
+    saved = []
+    portal = ExitPortalWindow(on_etag_event=saved.append)
+    try:
+        ignored = portal._record_controller_reading(ControllerReading(1, NOW, "TAG-2", 2))
+        event = portal._record_controller_reading(ControllerReading(2, NOW, "TAG-1", 1))
+        assert ignored is None
+        assert event is not None
+        assert (event.controller_name, event.door, event.direction) == (
+            "Exit Controller", "E-tag Exit", OUT,
+        )
+        assert saved == [event]
+    finally:
+        portal.close()
 
 
 def a_visit(visit_id="VIS-000141", plate="LEA-4410", barcode="8F2A19C4", **changes) -> VisitRecord:

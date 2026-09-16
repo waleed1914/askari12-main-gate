@@ -98,11 +98,11 @@ def default_settings() -> AppSettings:
     return AppSettings(
         controllers=(
             ControllerSettings("entry", "Entry Controller", "192.168.1.10", 80, "admin", True),
-            ControllerSettings("exit", "Exit Controller"),
+            ControllerSettings("exit", "Exit Controller", "192.168.1.11", 80, "admin", True),
         ),
         cameras=(
             CameraSettings("anpr_entry", ANPR, "ITC413-PW4D-Z3", "192.168.1.12", 37777, VISITOR_EXIT,
-                           http_port=84, snapshot_path="/cgi-bin/snapshot.cgi",
+                           http_port=80, snapshot_path="/cgi-bin/snapshot.cgi",
                            anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5"),
             CameraSettings("anpr_exit", ANPR, "ITC413-PW4D-Z3", "192.168.1.13", 37778, VISITOR_ENTRY,
                            snapshot_path="/cgi-bin/snapshot.cgi",

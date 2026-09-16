@@ -28,6 +28,9 @@ from PySide6.QtWidgets import (
 from askari_vms.audit import AuditLog, AuditSeverity
 from askari_vms.auth import Session
 from askari_vms.anpr import ANPRFeed
+from askari_vms.controller_events import ControllerEventFeed, ControllerReading
+from askari_vms.etag_events import ETagEvent, OUT, REPEAT_PASSAGE_SECONDS, build_event, collapse_repeated_passages
+from askari_vms.etags import ETagRecord
 from askari_vms.ip_camera import SnapshotFeed
 from askari_vms.ui.brand import circular_logo
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
@@ -75,6 +78,10 @@ class ExitPortalWindow(QWidget):
         anpr_camera: SnapshotFeed | None = None,
         anpr_feed: ANPRFeed | None = None,
         image_directory: str = "",
+        events: Sequence[ETagEvent] | None = None,
+        etags: Sequence[ETagRecord] | None = None,
+        controller_event_feed: ControllerEventFeed | None = None,
+        on_etag_event: Callable[[ETagEvent], None] | None = None,
     ) -> None:
         super().__init__()
         self._audit = audit_log if audit_log is not None else AuditLog()
@@ -86,6 +93,10 @@ class ExitPortalWindow(QWidget):
         self._anpr_camera = anpr_camera
         self._anpr_feed = anpr_feed
         self._image_directory = image_directory
+        self._events = collapse_repeated_passages(list(events or []))
+        self._etags = list(etags or [])
+        self._controller_event_feed = controller_event_feed
+        self._on_etag_event = on_etag_event
         self._driver_image = ""
         self._driver_after = time.monotonic()
         self._driver_displayed_at = 0.0
@@ -119,6 +130,12 @@ class ExitPortalWindow(QWidget):
             self._anpr_timer = QTimer(self)
             self._anpr_timer.timeout.connect(self._refresh_anpr)
             self._anpr_timer.start(250)
+        self._controller_event_timer: QTimer | None = None
+        if self._controller_event_feed is not None:
+            self._controller_event_feed.start()
+            self._controller_event_timer = QTimer(self)
+            self._controller_event_timer.timeout.connect(self._refresh_controller_events)
+            self._controller_event_timer.start(250)
 
     # ---------- construction ----------
 
@@ -547,6 +564,43 @@ class ExitPortalWindow(QWidget):
         for reading in readings:
             self.read_plate(reading.plate)
 
+    def _refresh_controller_events(self) -> None:
+        readings, (_connected, message) = self._controller_event_feed.drain()
+        for reading in readings:
+            self._record_controller_reading(reading)
+        if readings:
+            self.status.setText(message)
+
+    def _record_controller_reading(self, reading: ControllerReading) -> ETagEvent | None:
+        # Both controllers use physical Door 1 for e-tags. Door 2 belongs to VMS.
+        if reading.door != 1 or not reading.card:
+            return None
+        event_id = f"ETL-exit-{reading.event_id}"
+        if any(item.event_id == event_id for item in self._events):
+            return None
+        tag = reading.card.strip()
+        note = " — ".join(part for part in (reading.event, reading.note) if part)
+        repeated_index = next((index for index, prior in enumerate(self._events)
+            if prior.rfid == tag and prior.door == "E-tag Exit" and prior.direction == OUT
+            and 0 <= (reading.timestamp - prior.timestamp).total_seconds() <= REPEAT_PASSAGE_SECONDS), None)
+        if repeated_index is not None:
+            prior = self._events.pop(repeated_index)
+            event = replace(prior, timestamp=reading.timestamp, note=note or prior.note)
+        else:
+            event = build_event(event_id, reading.timestamp, "Exit Controller", "E-tag Exit",
+                                OUT, tag, self._etags, note=note)
+        self._events.insert(0, event)
+        if self._on_etag_event is not None:
+            self._on_etag_event(event)
+        if event.is_critical and repeated_index is None:
+            self._audit.record(
+                action="Hardware event", target="E-tag Exit",
+                summary=f"Unknown e-tag {event.rfid} read at E-tag Exit",
+                details=f"Exit Controller reported RFID {event.rfid}. Check card programming.",
+                severity=AuditSeverity.CRITICAL, operator="SYSTEM", timestamp=event.timestamp,
+            )
+        return event
+
     def _capture_driver(self) -> None:
         if self._driver_camera is None or self._driver_image:
             return
@@ -708,10 +762,14 @@ class ExitPortalWindow(QWidget):
             self._anpr_camera_timer.stop()
         if self._anpr_timer is not None:
             self._anpr_timer.stop()
+        if self._controller_event_timer is not None:
+            self._controller_event_timer.stop()
         if self._driver_camera is not None:
             self._driver_camera.stop()
         if self._anpr_camera is not None:
             self._anpr_camera.stop()
         if self._anpr_feed is not None:
             self._anpr_feed.stop()
+        if self._controller_event_feed is not None:
+            self._controller_event_feed.stop()
         super().closeEvent(event)

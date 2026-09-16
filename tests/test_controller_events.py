@@ -4,8 +4,10 @@ import time
 from askari_vms.controller_events import (
     ControllerEventFeed,
     ControllerReading,
+    exit_event_feed,
     parse_event_xml,
 )
+from askari_vms.settings import default_settings
 from askari_vms.etag_events import ETagEvent, ETagEventKind, IN
 from askari_vms.ui.pages.entry_portal import EntryPortalWindow
 
@@ -20,6 +22,13 @@ REAL_CONTROLLER = b'''<response>
 <!-- #GEvent -->
 {"ID":"89","Reader":"IN","Door":"1","Card":"77076","Name":"wahab","Note":"Entry","Time":"2026-09-14 21:25:30","SysTime":"2026-09-14 21:25:30","IsTwo":"2","OutPut":"1","InPut":"0","Lock":"0"}
 </response>'''
+
+
+def test_exit_feed_uses_confirmed_exit_controller():
+    feed = exit_event_feed(default_settings())
+    assert feed is not None
+    assert feed.client.address == "192.168.1.11"
+    assert feed.label == "Exit"
 
 
 def test_controller_event_xml_fields_are_parsed():

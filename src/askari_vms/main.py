@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from askari_vms.audit import AuditLog
 from askari_vms.cnic_ocr import LocalCNICReader
-from askari_vms.controller_events import entry_event_feed
+from askari_vms.controller_events import entry_event_feed, exit_event_feed
 from askari_vms.gate_controller import entry_gate_controller
 from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_anpr_snapshot_feed, exit_driver_feed
 from askari_vms.printing import DirectUsbPrinter
@@ -85,6 +85,9 @@ def main() -> int:
                 anpr_camera=exit_anpr_snapshot_feed(settings),
                 anpr_feed=exit_anpr_feed(settings),
                 image_directory=settings.storage.data_directory,
+                events=store.etag_events.list(), etags=store.etags.list(),
+                controller_event_feed=exit_event_feed(settings),
+                on_etag_event=store.etag_events.append,
             )
             audit.record(
                 action="Login",

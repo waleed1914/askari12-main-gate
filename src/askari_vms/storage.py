@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -142,7 +142,7 @@ class Database:
                 old_version = int(row["version"])
                 if old_version < 5 and self.count("categories") == 0:
                     self._seed_category_migration()
-                if old_version < 7:
+                if old_version < 8:
                     self._migrate_confirmed_camera_map()
                 self.connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
 
@@ -160,7 +160,7 @@ class Database:
             entry_anpr = cameras.get("anpr_exit")
             if exit_anpr is not None and exit_anpr.get("ip_address") == "192.168.1.12":
                 exit_anpr.update(
-                    lane="Visitor Exit", port=37777, http_port=84,
+                    lane="Visitor Exit", port=37777, http_port=80,
                     snapshot_path="/cgi-bin/snapshot.cgi",
                     anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5",
                 )
@@ -170,6 +170,10 @@ class Database:
                     snapshot_path="/cgi-bin/snapshot.cgi",
                     anpr_event_path="/cgi-bin/snapManager.cgi?action=attachFileProc&Flags%5B0%5D=Event&Events=%5BTrafficJunction%5D&heartbeat=5",
                 )
+            for controller in data.get("controllers", []):
+                if controller.get("key") == "exit":
+                    controller.update(ip_address="192.168.1.11", port=80,
+                                      username="admin", has_password=True)
         except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
             return
         self.connection.execute(

@@ -57,7 +57,7 @@ def test_exit_driver_uses_confirmed_hikvision_camera():
 def test_exit_anpr_live_view_uses_confirmed_http_port():
     feed = exit_anpr_snapshot_feed(default_settings())
     assert feed is not None
-    assert feed.client.url == "http://192.168.1.12:84/cgi-bin/snapshot.cgi"
+    assert feed.client.url == "http://192.168.1.12:80/cgi-bin/snapshot.cgi"
 
 
 def test_exit_driver_live_view_and_capture_are_persisted(qapp, tmp_path):

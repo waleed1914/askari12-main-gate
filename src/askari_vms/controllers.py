@@ -54,6 +54,6 @@ def default_controllers() -> tuple[Controller, Controller]:
         ),
         Controller(
             "exit", "Exit Controller", "Not configured", False,
-            (Door("exit", 1, "Visitor Exit", "Visitor"), Door("exit", 2, "E-tag Exit", "E-Tag")),
+            (Door("exit", 1, "E-tag Exit", "E-Tag"), Door("exit", 2, "Visitor Exit", "Visitor")),
         ),
     )

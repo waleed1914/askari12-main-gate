@@ -465,7 +465,8 @@ def test_allowed_controllers_follow_the_configured_controllers(qapp) -> None:
     labels = [cb.text() for cb in page.stack.currentWidget()._controller_checks.values()]
     assert "192.168.1.10" in labels[0], "a configured controller should show its address"
     assert "E-tag Entry" in labels[0], "the picker must name the e-tag door, not the visitor door"
-    assert "not configured" in labels[1]
+    assert "192.168.1.11" in labels[1]
+    assert "E-tag Exit" in labels[1]
     page._show_list()
 
     # Give the Exit controller an address; the picker must follow.
