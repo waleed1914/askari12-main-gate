@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from askari_vms.audit import AuditLog, AuditSeverity
 from askari_vms.auth import Session
 from askari_vms.camera_link import NO_DEVICE, UNPLUGGED, CameraLink, LinkState
-from askari_vms.ui.brand import circular_logo
+from askari_vms.ui.brand import circular_logo, partner_logo
 from askari_vms.categories import VehicleCategory, by_shortcut
 from askari_vms.cnic_ocr import CNICCapture, CNICReader, CNICReadError
 from askari_vms.controller_events import ControllerEventFeed, ControllerReading
@@ -527,6 +527,16 @@ class EntryPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
+        partner = partner_logo()
+        if not partner.isNull():
+            powered = QLabel("Powered by")
+            powered.setProperty("muted", "true")
+            row.addWidget(powered)
+            partner_mark = QLabel()
+            partner_mark.setObjectName("partnerLogo")
+            partner_mark.setPixmap(partner)
+            row.addWidget(partner_mark)
+
         if self._gate_controller is not None:
             mode = "ANPR auto-fill enabled · Physical gate control enabled"
         else:
@@ -640,7 +650,7 @@ class EntryPortalWindow(QWidget):
         self.cnic_panel = StreamPanel("ID card — compact preview")
         # Title, image and status each keep their own row. Without this minimum,
         # the two large camera panels below can squeeze the status into the image.
-        self.cnic_panel.setMinimumHeight(190)
+        self.cnic_panel.setMinimumHeight(180)
         views = QGridLayout()
         views.setSpacing(12)
         views.addWidget(self.cnic_panel, 0, 0, 1, 2)

@@ -36,7 +36,7 @@ from askari_vms.ip_camera import SnapshotFeed
 from askari_vms.controllers import DoorCommand
 from askari_vms.gate_controller import GateController
 from askari_vms.lan_client import ExitSyncService
-from askari_vms.ui.brand import circular_logo
+from askari_vms.ui.brand import circular_logo, partner_logo
 from askari_vms.ui.tables import ProportionalColumns, fit_height_to_rows
 from askari_vms.visits import (
     DriverMatch,
@@ -209,6 +209,16 @@ class ExitPortalWindow(QWidget):
         row.addSpacing(24)
         row.addWidget(heading)
         row.addStretch()
+
+        partner = partner_logo()
+        if not partner.isNull():
+            powered = QLabel("Powered by")
+            powered.setProperty("muted", "true")
+            row.addWidget(powered)
+            partner_mark = QLabel()
+            partner_mark.setObjectName("partnerLogo")
+            partner_mark.setPixmap(partner)
+            row.addWidget(partner_mark)
 
         self.simulation = QLabel(
             "EXIT BARRIER CONNECTED" if self._gate_controller is not None

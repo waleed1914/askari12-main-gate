@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QImage, QPainter, QPainterPath, QPixmap, qGray
 
 LOGO_NAMES = ("logo.png", "logo.jpeg", "logo.jpg", "logo.webp", "logo.bmp")
+PARTNER_LOGO_NAME = "logo-nav.jpeg"
 _ASSETS = Path(__file__).parent / "assets"
 
 _DARK = 45          # luminance at or below this counts as part of a black border
@@ -21,6 +22,19 @@ _SAMPLE_STEP = 24   # pixels sampled across a line when testing for uniform dark
 
 def logo_path() -> Path | None:
     return next((_ASSETS / name for name in LOGO_NAMES if (_ASSETS / name).is_file()), None)
+
+
+def partner_logo(height: int = 24, ratio: int = 2) -> QPixmap:
+    """Rectangular delivery-partner logo, preserving its original proportions."""
+    image = QImage(str(_ASSETS / PARTNER_LOGO_NAME))
+    if image.isNull():
+        return QPixmap()
+    pixels = max(1, height * ratio)
+    result = QPixmap.fromImage(image).scaledToHeight(
+        pixels, Qt.TransformationMode.SmoothTransformation
+    )
+    result.setDevicePixelRatio(ratio)
+    return result
 
 
 def _line_is_dark(image: QImage, index: int, horizontal: bool) -> bool:

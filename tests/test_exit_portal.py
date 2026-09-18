@@ -335,3 +335,5 @@ def test_the_emblem_appears_on_the_exit_header(portal) -> None:
     emblem = portal.findChild(QLabel, "brandLogo")
     assert emblem is not None and not emblem.pixmap().isNull()
     assert emblem.width() == HEADER_LOGO_SIZE
+    partner = portal.findChild(QLabel, "partnerLogo")
+    assert partner is not None and not partner.pixmap().isNull()

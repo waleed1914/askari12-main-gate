@@ -114,7 +114,7 @@ def test_entry_portal_displays_the_anpr_live_snapshot(qapp):
         feed.frame = CameraFrame(jpeg(), time.monotonic(), "Live ANPR camera")
         portal._refresh_anpr_camera()
         assert not portal._streams["anpr"].preview.pixmap().isNull()
-        assert portal.cnic_panel.minimumHeight() == 190
+        assert portal.cnic_panel.minimumHeight() == 180
         assert portal.cnic_panel.state.minimumHeight() == 30
     finally:
         portal.close()
