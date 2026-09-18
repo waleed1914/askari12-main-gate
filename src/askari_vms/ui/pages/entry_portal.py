@@ -188,7 +188,8 @@ class StreamPanel(QFrame):
         layout = QHBoxLayout(self) if compact else QGridLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(10 if compact else 4)
-        self.name = QLabel(title)
+        short_title = "ANPR" if title.startswith("ANPR") else "Driver" if title.startswith("Driver") else title
+        self.name = QLabel(short_title)
         self.name.setObjectName("captureTitle")
         self.name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if compact:
@@ -202,23 +203,31 @@ class StreamPanel(QFrame):
             self.state.setMinimumWidth(190)
         self.preview = CameraPreview(cover=not compact)
         self.preview.hide()
+        self.display_state: QLabel | None = None
         if compact:
             layout.addWidget(self.name, 0)
             layout.addWidget(self.preview, 2)
             layout.addWidget(self.state, 1)
         else:
-            self.name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-            self.name.setWordWrap(True)
-            self.name.setMaximumWidth(180)
-            self.state.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
-            self.state.setMaximumWidth(180)
-            layout.addWidget(self.name, 0, 0, Qt.AlignmentFlag.AlignTop)
-            layout.addWidget(self.state, 1, 0, Qt.AlignmentFlag.AlignBottom)
-            layout.addWidget(self.preview, 0, 1, 2, 1)
-            layout.setColumnStretch(1, 1)
+            self.state.hide()  # detailed diagnostics remain available without cluttering the live view
+            self.display_state = QLabel("Disconnected")
+            self.display_state.setProperty("muted", "true")
+            for label in (self.name, self.display_state):
+                label.setStyleSheet(
+                    "background: rgba(245, 248, 246, 220); padding: 3px 9px; border-radius: 5px;"
+                )
+            layout.addWidget(self.preview, 0, 0)
+            layout.addWidget(
+                self.name, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+            )
+            layout.addWidget(
+                self.display_state, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+            )
 
     def set_state(self, text: str, live: bool = False) -> None:
         self.state.setText(text)
+        if self.display_state is not None:
+            self.display_state.setText("Live" if live else "Disconnected")
         self.setProperty("captured", "true" if live else "false")
         self.style().unpolish(self)
         self.style().polish(self)
@@ -380,7 +389,7 @@ class EntryPortalWindow(QWidget):
     def _refresh_anpr(self) -> None:
         readings, (connected, message) = self._anpr_feed.drain()
         if self._anpr_camera is None:
-            self._streams["anpr"].set_state(message)
+            self._streams["anpr"].set_state(message, live=connected)
         if connected != self._anpr_connected:
             self._audit.record(
                 action="Hardware event", target="Visitor Entry ANPR",
@@ -406,7 +415,10 @@ class EntryPortalWindow(QWidget):
                 self._anpr_camera_displayed_at = frame.received_at
         if not available:
             panel.clear_image()
-        panel.set_state(frame.message if available or not frame.jpeg else "ANPR camera stalled — reconnecting.")
+        panel.set_state(
+            frame.message if available or not frame.jpeg else "ANPR camera stalled — reconnecting.",
+            live=available,
+        )
         if available != self._anpr_camera_available:
             if available or self._anpr_camera_available is not None:
                 self._audit.record(
@@ -430,7 +442,10 @@ class EntryPortalWindow(QWidget):
                 self._driver_displayed_at = frame.received_at
         if not available:
             panel.clear_image()
-        panel.set_state(frame.message if available or not frame.jpeg else "Driver camera stalled — reconnecting.")
+        panel.set_state(
+            frame.message if available or not frame.jpeg else "Driver camera stalled — reconnecting.",
+            live=available,
+        )
         if available != self._driver_available:
             # Do not audit the normal initial connecting state as an outage.
             if available or self._driver_available is not None:
@@ -617,18 +632,22 @@ class EntryPortalWindow(QWidget):
         top = QHBoxLayout()
         heading = QLabel("Entry details")
         heading.setProperty("section", "true")
-        top.addWidget(heading)
+        layout.addWidget(heading)
         top.addStretch()
-        layout.addLayout(top)
 
         self.cnic_panel = StreamPanel("ID card", compact=True)
         self.cnic_panel.name.hide()
         self.cnic_panel.state.hide()
+        self.cnic_panel.setMinimumHeight(110)
+        self.cnic_panel.setMinimumWidth(260)
+        self.cnic_panel.setMaximumWidth(360)
         self.capture_button = QPushButton("Capture ID")
         self.capture_button.setObjectName("primaryButton")
         self.capture_button.clicked.connect(self.capture)
-        self.cnic_panel.layout().insertWidget(0, self.capture_button)
-        layout.addWidget(self.cnic_panel)
+        self.capture_button.setMinimumWidth(96)
+        top.addWidget(self.capture_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(self.cnic_panel)
+        layout.addLayout(top)
 
         self.fields: dict[str, QLineEdit] = {}
         placeholders = {
