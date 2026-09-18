@@ -140,11 +140,12 @@ class _DictationWorker(QObject):
 
 
 class CameraPreview(QLabel):
-    """Keep the original image and fit it to the available space without cropping."""
+    """Scale a camera frame responsively, optionally filling the complete viewport."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, cover: bool = False) -> None:
         super().__init__()
         self._source = QPixmap()
+        self._cover = cover
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setMinimumSize(80, 90)
@@ -155,10 +156,18 @@ class CameraPreview(QLabel):
 
     def _fit(self) -> None:
         if not self._source.isNull():
-            super().setPixmap(self._source.scaled(
-                self.contentsRect().size(), Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+            size = self.contentsRect().size()
+            if size.isEmpty():
+                return
+            aspect_mode = Qt.AspectRatioMode.KeepAspectRatioByExpanding if self._cover else (
+                Qt.AspectRatioMode.KeepAspectRatio
+            )
+            fitted = self._source.scaled(size, aspect_mode, Qt.TransformationMode.SmoothTransformation)
+            if self._cover and fitted.size() != size:
+                left = max(0, (fitted.width() - size.width()) // 2)
+                top = max(0, (fitted.height() - size.height()) // 2)
+                fitted = fitted.copy(left, top, size.width(), size.height())
+            super().setPixmap(fitted)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -175,23 +184,27 @@ class StreamPanel(QFrame):
     def __init__(self, title: str, compact: bool = False) -> None:
         super().__init__()
         self.setObjectName("capturePanel")
-        self.setMinimumHeight(0 if compact else 150)
+        self.setMinimumHeight(60 if compact else 150)
         layout = QHBoxLayout(self) if compact else QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
+        layout.setSpacing(10 if compact else 4)
         name = QLabel(title)
         name.setObjectName("captureTitle")
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if compact:
+            name.setMinimumWidth(70)
         self.state = QLabel("No feed")
         self.state.setProperty("muted", "true")
         self.state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state.setWordWrap(True)
         self.state.setMinimumHeight(30)
-        self.preview = CameraPreview()
+        if compact:
+            self.state.setMinimumWidth(190)
+        self.preview = CameraPreview(cover=not compact)
         self.preview.hide()
-        layout.addWidget(name)
-        layout.addWidget(self.preview, 1)
-        layout.addWidget(self.state)
+        layout.addWidget(name, 0)
+        layout.addWidget(self.preview, 2)
+        layout.addWidget(self.state, 1 if compact else 0)
 
     def set_state(self, text: str, live: bool = False) -> None:
         self.state.setText(text)
