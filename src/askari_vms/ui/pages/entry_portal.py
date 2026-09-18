@@ -185,7 +185,7 @@ class StreamPanel(QFrame):
         super().__init__()
         self.setObjectName("capturePanel")
         self.setMinimumHeight(60 if compact else 150)
-        layout = QHBoxLayout(self) if compact else QVBoxLayout(self)
+        layout = QHBoxLayout(self) if compact else QGridLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(10 if compact else 4)
         name = QLabel(title)
@@ -202,9 +202,20 @@ class StreamPanel(QFrame):
             self.state.setMinimumWidth(190)
         self.preview = CameraPreview(cover=not compact)
         self.preview.hide()
-        layout.addWidget(name, 0)
-        layout.addWidget(self.preview, 2)
-        layout.addWidget(self.state, 1 if compact else 0)
+        if compact:
+            layout.addWidget(name, 0)
+            layout.addWidget(self.preview, 2)
+            layout.addWidget(self.state, 1)
+        else:
+            name.setStyleSheet(
+                "background: rgba(245, 248, 246, 215); padding: 3px 10px; border-radius: 6px;"
+            )
+            self.state.setStyleSheet(
+                "background: rgba(245, 248, 246, 215); padding: 2px 8px; border-radius: 6px;"
+            )
+            layout.addWidget(self.preview, 0, 0)
+            layout.addWidget(name, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+            layout.addWidget(self.state, 0, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
 
     def set_state(self, text: str, live: bool = False) -> None:
         self.state.setText(text)
@@ -505,7 +516,6 @@ class EntryPortalWindow(QWidget):
         root.addLayout(columns, 1)
 
         root.addWidget(self._events_card(), 0)
-        root.addWidget(self._footer())
 
     def _header(self) -> QFrame:
         bar = QFrame()
@@ -540,15 +550,27 @@ class EntryPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
-        if self._gate_controller is not None:
-            mode = "ANPR auto-fill enabled · Physical gate control enabled"
-        else:
-            mode = "ANPR auto-fill enabled · Gate simulated" if self._anpr_feed else (
-            "Driver preview enabled · Gate simulated" if self._driver_camera else "Gate and IP cameras simulated")
-        self.simulation = QLabel(mode)
-        self.simulation.setProperty("status", "warning")
-        self.simulation.setWordWrap(True)
-        row.addWidget(self.simulation)
+        self.status = QLabel()
+        self.status.setProperty("muted", "true")
+        self.status.setWordWrap(True)
+        self.status.setMaximumWidth(300)
+        row.addWidget(self.status)
+
+        self.reuse_button = QPushButton("Use previous details")
+        self.reuse_button.clicked.connect(self.reuse_previous)
+        self.reuse_button.hide()
+        row.addWidget(self.reuse_button)
+
+        powered = self._powered_by_widget()
+        if powered is not None:
+            row.addWidget(powered, 0, Qt.AlignmentFlag.AlignCenter)
+
+        self.submit_button = QPushButton("Submit and open gate")
+        self.submit_button.setObjectName("primaryButton")
+        self.submit_button.setMinimumHeight(42)
+        self.submit_button.setMinimumWidth(210)
+        self.submit_button.clicked.connect(self.submit)
+        row.addWidget(self.submit_button)
 
         self.refresh_button = QPushButton("Refresh Cameras")
         self.refresh_button.clicked.connect(self.refresh_cameras)
@@ -587,6 +609,7 @@ class EntryPortalWindow(QWidget):
     def _form_card(self) -> QFrame:
         card = QFrame()
         card.setProperty("card", True)
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(18, 14, 18, 16)
         layout.setSpacing(4)
@@ -651,6 +674,7 @@ class EntryPortalWindow(QWidget):
     def _capture_card(self) -> QFrame:
         card = QFrame()
         card.setProperty("card", True)
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 16)
         layout.setSpacing(10)
@@ -697,32 +721,6 @@ class EntryPortalWindow(QWidget):
         self._event_columns = ProportionalColumns(self.events_table, EVENT_WEIGHTS)
         layout.addWidget(self.events_table)
         return card
-
-    def _footer(self) -> QFrame:
-        bar = QFrame()
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.status = QLabel()
-        self.status.setProperty("muted", "true")
-        self.status.setWordWrap(True)
-        row.addWidget(self.status, 1)
-
-        self.reuse_button = QPushButton("Use previous details")
-        self.reuse_button.clicked.connect(self.reuse_previous)
-        self.reuse_button.hide()
-        row.addWidget(self.reuse_button)
-
-        powered = self._powered_by_widget()
-        if powered is not None:
-            row.addWidget(powered, 0, Qt.AlignmentFlag.AlignCenter)
-
-        self.submit_button = QPushButton("Submit and open gate")
-        self.submit_button.setObjectName("primaryButton")
-        self.submit_button.setMinimumHeight(42)
-        self.submit_button.setMinimumWidth(220)
-        self.submit_button.clicked.connect(self.submit)
-        row.addWidget(self.submit_button)
-        return bar
 
     @staticmethod
     def _powered_by_widget() -> QWidget | None:
