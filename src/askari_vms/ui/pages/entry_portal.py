@@ -588,6 +588,23 @@ class EntryPortalWindow(QWidget):
         layout.setContentsMargins(18, 14, 18, 16)
         layout.setSpacing(4)
 
+        top = QHBoxLayout()
+        heading = QLabel("Entry details")
+        heading.setProperty("section", "true")
+        top.addWidget(heading)
+        top.addStretch()
+        self.capture_button = QPushButton("Capture ID")
+        self.capture_button.setObjectName("primaryButton")
+        self.capture_button.clicked.connect(self.capture)
+        top.addWidget(self.capture_button)
+        layout.addLayout(top)
+
+        self.cnic_panel = StreamPanel("ID card", compact=True)
+        layout.addWidget(self.cnic_panel)
+        self.choose_button = QPushButton("Choose ID card image")
+        self.choose_button.clicked.connect(self.choose_cnic_image)
+        layout.addWidget(self.choose_button)
+
         self.fields: dict[str, QLineEdit] = {}
         placeholders = {
             "vehicle_number": "Filled by ANPR — confirm before submitting",
@@ -635,41 +652,18 @@ class EntryPortalWindow(QWidget):
         layout.setContentsMargins(16, 14, 16, 16)
         layout.setSpacing(10)
 
-        top = QHBoxLayout()
-        heading = QLabel("Visitor cameras")
+        heading = QLabel("Visitor cameras — live")
         heading.setProperty("section", "true")
-        top.addWidget(heading)
-        top.addStretch()
-        self.capture_button = QPushButton("Capture")
-        self.capture_button.setObjectName("primaryButton")
-        self.capture_button.setStyleSheet("min-height: 28px; padding: 6px 16px;")
-        self.capture_button.clicked.connect(self.capture)
-        top.addWidget(self.capture_button)
-        layout.addLayout(top)
+        layout.addWidget(heading)
 
-        self.cnic_panel = StreamPanel("ID card — compact preview")
-        # Title, image and status each keep their own row. Without this minimum,
-        # the two large camera panels below can squeeze the status into the image.
-        self.cnic_panel.setMinimumHeight(180)
-        views = QGridLayout()
-        views.setSpacing(12)
-        views.addWidget(self.cnic_panel, 0, 0, 1, 2)
         self._streams: dict[str, StreamPanel] = {}
         for key, title in STREAMS:
             panel = StreamPanel(title)
+            panel.layout().setContentsMargins(8, 6, 8, 6)
+            panel.layout().setSpacing(2)
             self._streams[key] = panel
-        views.addWidget(self._streams["driver"], 1, 0)
-        views.addWidget(self._streams["anpr"], 1, 1)
-        views.setColumnStretch(0, 1)
-        views.setColumnStretch(1, 1)
-        views.setRowStretch(0, 0)
-        views.setRowStretch(1, 1)
-        layout.addLayout(views, 1)
-
-        self.choose_button = QPushButton("Choose ID card image…")
-        self.choose_button.setStyleSheet("min-height: 28px; padding: 6px 16px;")
-        self.choose_button.clicked.connect(self.choose_cnic_image)
-        layout.addWidget(self.choose_button)
+        layout.addWidget(self._streams["driver"], 1)
+        layout.addWidget(self._streams["anpr"], 1)
         return card
 
     def _events_card(self) -> QFrame:

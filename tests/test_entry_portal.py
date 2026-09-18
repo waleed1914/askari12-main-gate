@@ -459,6 +459,7 @@ def test_spare_height_goes_to_the_form_not_the_event_table(qapp) -> None:
 
 
 def test_camera_panels_never_overlap_and_preview_grows(qapp):
+    from PySide6.QtCore import QRect
     from PySide6.QtGui import QPixmap
     from askari_vms.ui.pages.entry_portal import EntryPortalWindow
     from askari_vms.ui.theme import APP_STYLESHEET
@@ -482,7 +483,9 @@ def test_camera_panels_never_overlap_and_preview_grows(qapp):
             for index, panel in enumerate(panels):
                 assert panel.parentWidget().rect().contains(panel.geometry())
                 for other in panels[index + 1:]:
-                    assert not panel.geometry().intersects(other.geometry())
+                    panel_rect = QRect(panel.mapTo(page, panel.rect().topLeft()), panel.size())
+                    other_rect = QRect(other.mapTo(page, other.rect().topLeft()), other.size())
+                    assert not panel_rect.intersects(other_rect)
             preview = page._streams["driver"].preview
             assert preview.pixmap().width() <= preview.width()
             assert preview.pixmap().height() <= preview.height()
