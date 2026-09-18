@@ -186,6 +186,7 @@ class StreamPanel(QFrame):
         self.state.setProperty("muted", "true")
         self.state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state.setWordWrap(True)
+        self.state.setMinimumHeight(30)
         self.preview = CameraPreview()
         self.preview.hide()
         layout.addWidget(name)
@@ -637,7 +638,9 @@ class EntryPortalWindow(QWidget):
         layout.addLayout(top)
 
         self.cnic_panel = StreamPanel("ID card — compact preview")
-        self.cnic_panel.setMaximumHeight(190)
+        # Title, image and status each keep their own row. Without this minimum,
+        # the two large camera panels below can squeeze the status into the image.
+        self.cnic_panel.setMinimumHeight(190)
         views = QGridLayout()
         views.setSpacing(12)
         views.addWidget(self.cnic_panel, 0, 0, 1, 2)
