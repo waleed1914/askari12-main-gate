@@ -527,16 +527,6 @@ class EntryPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
-        partner = partner_logo()
-        if not partner.isNull():
-            powered = QLabel("Powered by")
-            powered.setProperty("muted", "true")
-            row.addWidget(powered)
-            partner_mark = QLabel()
-            partner_mark.setObjectName("partnerLogo")
-            partner_mark.setPixmap(partner)
-            row.addWidget(partner_mark)
-
         if self._gate_controller is not None:
             mode = "ANPR auto-fill enabled · Physical gate control enabled"
         else:
@@ -709,6 +699,10 @@ class EntryPortalWindow(QWidget):
         self.reuse_button.hide()
         row.addWidget(self.reuse_button)
 
+        powered = self._powered_by_widget()
+        if powered is not None:
+            row.addWidget(powered, 0, Qt.AlignmentFlag.AlignCenter)
+
         self.submit_button = QPushButton("Submit and open gate")
         self.submit_button.setObjectName("primaryButton")
         self.submit_button.setMinimumHeight(42)
@@ -716,6 +710,25 @@ class EntryPortalWindow(QWidget):
         self.submit_button.clicked.connect(self.submit)
         row.addWidget(self.submit_button)
         return bar
+
+    @staticmethod
+    def _powered_by_widget() -> QWidget | None:
+        partner = partner_logo()
+        if partner.isNull():
+            return None
+        holder = QWidget()
+        holder.setObjectName("poweredBy")
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(6)
+        text = QLabel("Powered by")
+        text.setProperty("muted", "true")
+        mark = QLabel()
+        mark.setObjectName("partnerLogo")
+        mark.setPixmap(partner)
+        layout.addWidget(text)
+        layout.addWidget(mark)
+        return holder
 
     def _install_shortcuts(self) -> None:
         for category in self._categories:

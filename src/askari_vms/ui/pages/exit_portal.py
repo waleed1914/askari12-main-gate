@@ -242,16 +242,6 @@ class ExitPortalWindow(QWidget):
         row.addWidget(heading)
         row.addStretch()
 
-        partner = partner_logo()
-        if not partner.isNull():
-            powered = QLabel("Powered by")
-            powered.setProperty("muted", "true")
-            row.addWidget(powered)
-            partner_mark = QLabel()
-            partner_mark.setObjectName("partnerLogo")
-            partner_mark.setPixmap(partner)
-            row.addWidget(partner_mark)
-
         self.simulation = QLabel(
             "EXIT BARRIER CONNECTED" if self._gate_controller is not None
             else "EXIT BARRIER UNAVAILABLE — MANUAL OPERATION"
@@ -439,6 +429,10 @@ class ExitPortalWindow(QWidget):
         self.status.setWordWrap(True)
         row.addWidget(self.status, 1)
 
+        powered = self._powered_by_widget()
+        if powered is not None:
+            row.addWidget(powered, 0, Qt.AlignmentFlag.AlignCenter)
+
         shortcuts = QLabel(
             f"<b>{MATCH_KEY}</b> matched + open   <b>{MISMATCH_KEY}</b> mismatched + open   "
             f"<b>{LOST_RECEIPT_KEY}</b> lost receipt + open   <b>{CLEAR_KEY}</b> next"
@@ -453,6 +447,25 @@ class ExitPortalWindow(QWidget):
         self.submit_button.clicked.connect(self.submit)
         row.addWidget(self.submit_button)
         return bar
+
+    @staticmethod
+    def _powered_by_widget() -> QWidget | None:
+        partner = partner_logo()
+        if partner.isNull():
+            return None
+        holder = QWidget()
+        holder.setObjectName("poweredBy")
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(6)
+        text = QLabel("Powered by")
+        text.setProperty("muted", "true")
+        mark = QLabel()
+        mark.setObjectName("partnerLogo")
+        mark.setPixmap(partner)
+        layout.addWidget(text)
+        layout.addWidget(mark)
+        return holder
 
     def _install_shortcuts(self) -> None:
         for key, slot in (
