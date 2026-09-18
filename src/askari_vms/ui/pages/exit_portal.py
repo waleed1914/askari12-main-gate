@@ -23,7 +23,7 @@ from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QImage, QKeySequence, QShortcut, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from askari_vms.audit import AuditLog, AuditSeverity
@@ -64,6 +64,38 @@ RESULT_COLUMNS = ("Visit", "Vehicle", "Visitor", "CNIC", "Entry", "Inside", "Des
 RESULT_WEIGHTS = (12, 12, 18, 16, 15, 9, 18)
 
 NO_ACTIVE_ENTRY = "No active entry found. Search by plate, CNIC or visit number, or open the gate manually."
+
+
+class EvidencePreview(QLabel):
+    """Use all available evidence-card space while preserving the whole photograph."""
+
+    def __init__(self, empty_text: str) -> None:
+        super().__init__(empty_text)
+        self._source = QPixmap()
+        self.setProperty("muted", "true")
+        self.setWordWrap(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumHeight(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def setPixmap(self, pixmap: QPixmap) -> None:
+        self._source = pixmap
+        self._fit()
+
+    def _fit(self) -> None:
+        if not self._source.isNull() and self.contentsRect().size().isValid():
+            super().setPixmap(self._source.scaled(
+                self.contentsRect().size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit()
+
+    def clear(self) -> None:
+        self._source = QPixmap()
+        super().clear()
 
 
 class ExitPortalWindow(QWidget):
@@ -315,8 +347,7 @@ class ExitPortalWindow(QWidget):
         evidence_row.setSpacing(12)
         evidence_row.addWidget(driver_panel, 1)
         evidence_row.addWidget(anpr_panel, 1)
-        layout.addLayout(evidence_row)
-        layout.addStretch()
+        layout.addLayout(evidence_row, 1)
 
         decision_row = QHBoxLayout()
         decision_row.setSpacing(10)
@@ -349,11 +380,7 @@ class ExitPortalWindow(QWidget):
         heading = QLabel(title)
         heading.setObjectName("captureTitle")
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        preview = QLabel(empty_text)
-        preview.setProperty("muted", "true")
-        preview.setWordWrap(True)
-        preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        preview.setMinimumHeight(180)
+        preview = EvidencePreview(empty_text)
         box.addWidget(heading)
         box.addWidget(preview, 1)
         return panel, preview
@@ -509,17 +536,13 @@ class ExitPortalWindow(QWidget):
         if not photo.isNull():
             # Keep the entry evidence visible when the live-camera column asks
             # for more vertical space than the window currently has.
-            self.evidence.setPixmap(photo.scaled(420, 190, Qt.AspectRatioMode.KeepAspectRatio,
-                                                Qt.TransformationMode.SmoothTransformation))
+            self.evidence.setPixmap(photo)
             self.evidence.setToolTip("Driver photographed at entry")
         else:
             self.evidence.setText("Entry driver photo unavailable. Compare manually and record your decision.")
         anpr = QPixmap(visit.entry_anpr_image) if visit.entry_anpr_image else QPixmap()
         if not anpr.isNull():
-            self.anpr_evidence.setPixmap(anpr.scaled(
-                420, 190, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+            self.anpr_evidence.setPixmap(anpr)
             self.anpr_evidence.setToolTip("ANPR overview photographed at entry")
         else:
             self.anpr_evidence.setText("Entry ANPR photograph unavailable.")
