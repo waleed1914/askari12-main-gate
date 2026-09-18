@@ -188,11 +188,11 @@ class StreamPanel(QFrame):
         layout = QHBoxLayout(self) if compact else QGridLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(10 if compact else 4)
-        name = QLabel(title)
-        name.setObjectName("captureTitle")
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.name = QLabel(title)
+        self.name.setObjectName("captureTitle")
+        self.name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if compact:
-            name.setMinimumWidth(70)
+            self.name.setMinimumWidth(70)
         self.state = QLabel("No feed")
         self.state.setProperty("muted", "true")
         self.state.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -203,19 +203,19 @@ class StreamPanel(QFrame):
         self.preview = CameraPreview(cover=not compact)
         self.preview.hide()
         if compact:
-            layout.addWidget(name, 0)
+            layout.addWidget(self.name, 0)
             layout.addWidget(self.preview, 2)
             layout.addWidget(self.state, 1)
         else:
-            name.setStyleSheet(
-                "background: rgba(245, 248, 246, 215); padding: 3px 10px; border-radius: 6px;"
-            )
-            self.state.setStyleSheet(
-                "background: rgba(245, 248, 246, 215); padding: 2px 8px; border-radius: 6px;"
-            )
-            layout.addWidget(self.preview, 0, 0)
-            layout.addWidget(name, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
-            layout.addWidget(self.state, 0, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
+            self.name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self.name.setWordWrap(True)
+            self.name.setMaximumWidth(180)
+            self.state.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+            self.state.setMaximumWidth(180)
+            layout.addWidget(self.name, 0, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(self.state, 1, 0, Qt.AlignmentFlag.AlignBottom)
+            layout.addWidget(self.preview, 0, 1, 2, 1)
+            layout.setColumnStretch(1, 1)
 
     def set_state(self, text: str, live: bool = False) -> None:
         self.state.setText(text)
@@ -619,17 +619,16 @@ class EntryPortalWindow(QWidget):
         heading.setProperty("section", "true")
         top.addWidget(heading)
         top.addStretch()
-        self.capture_button = QPushButton("Capture ID")
-        self.capture_button.setObjectName("primaryButton")
-        self.capture_button.clicked.connect(self.capture)
-        top.addWidget(self.capture_button)
         layout.addLayout(top)
 
         self.cnic_panel = StreamPanel("ID card", compact=True)
+        self.cnic_panel.name.hide()
+        self.cnic_panel.state.hide()
+        self.capture_button = QPushButton("Capture ID")
+        self.capture_button.setObjectName("primaryButton")
+        self.capture_button.clicked.connect(self.capture)
+        self.cnic_panel.layout().insertWidget(0, self.capture_button)
         layout.addWidget(self.cnic_panel)
-        self.choose_button = QPushButton("Choose ID card image")
-        self.choose_button.clicked.connect(self.choose_cnic_image)
-        layout.addWidget(self.choose_button)
 
         self.fields: dict[str, QLineEdit] = {}
         placeholders = {
