@@ -1,0 +1,53 @@
+from datetime import date
+from urllib.parse import parse_qs
+
+from askari_vms.demo_data import etag_records
+from askari_vms.etag_controller import HttpETagController
+
+
+class _Response:
+    def __init__(self, body): self.body = body
+    def __enter__(self): return self
+    def __exit__(self, *_): return None
+    def read(self, _limit): return self.body.encode()
+
+
+def test_new_card_uses_free_slot_door_one_and_verifies(monkeypatch):
+    requests = []
+    searches = iter(["no result", '<a href="EditCard.shtm?ID=1">found</a>'])
+
+    class Opener:
+        def open(self, request, timeout):
+            requests.append(request)
+            if request.full_url.endswith("/SearchCard.shtm"):
+                return _Response(next(searches))
+            if "ShowCards" in request.full_url:
+                return _Response('<a href="EditCard.shtm?ID=0">card</a>')
+            return _Response("saved")
+
+    monkeypatch.setattr("askari_vms.etag_controller.read_credentials", lambda *_: ("admin", "secret"))
+    monkeypatch.setattr("askari_vms.etag_controller.urllib.request.build_opener", lambda *_: Opener())
+    record = etag_records(1)[0]
+    record = record.__class__(**{**record.__dict__}) if hasattr(record, "__dict__") else record
+    result = HttpETagController("entry", "192.168.1.10", max_pages=1).save(record)
+    assert result.slot == 1
+    write = next(request for request in requests if request.full_url.endswith("/EditCard.shtm"))
+    data = parse_qs(write.data.decode())
+    assert data["Index"] == ["2"]
+    assert data["TZ1"] == ["1"]
+    assert data["TZ17"] == ["0"]
+    assert data["Card"] == [record.rfid]
+
+
+def test_existing_card_reuses_its_slot(monkeypatch):
+    requests = []
+    class Opener:
+        def open(self, request, timeout):
+            requests.append(request)
+            return _Response('<a href="EditCard.shtm?ID=8">found</a>' if request.full_url.endswith("/SearchCard.shtm") else "saved")
+    monkeypatch.setattr("askari_vms.etag_controller.read_credentials", lambda *_: ("admin", "secret"))
+    monkeypatch.setattr("askari_vms.etag_controller.urllib.request.build_opener", lambda *_: Opener())
+    record = etag_records(1)[0]
+    HttpETagController("exit", "192.168.1.11").save(record)
+    write = next(request for request in requests if request.full_url.endswith("/EditCard.shtm"))
+    assert parse_qs(write.data.decode())["Index"] == ["9"]
