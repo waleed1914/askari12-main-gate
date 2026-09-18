@@ -977,6 +977,13 @@ class EntryPortalWindow(QWidget):
 
         self._id_device_name = device.description()
         self._id_camera = QCamera(device, self)
+        # OpenCV capture uses a calibrated manual lens position. Some webcams retain
+        # that setting after the handle closes, so explicitly return the persistent
+        # live preview to autofocus whenever the device supports it.
+        for mode in (QCamera.FocusMode.FocusModeAutoNear, QCamera.FocusMode.FocusModeAuto):
+            if self._id_camera.isFocusModeSupported(mode):
+                self._id_camera.setFocusMode(mode)
+                break
         self._id_camera_session = QMediaCaptureSession(self)
         self._id_video_sink = QVideoSink(self)
         self._id_camera_session.setCamera(self._id_camera)
