@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -103,6 +103,12 @@ CREATE TABLE IF NOT EXISTS sync_outbox (
     created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sync_outbox_created ON sync_outbox(created_at);
+
+CREATE TABLE IF NOT EXISTS etag_controller_sync (
+    rfid TEXT NOT NULL, controller_key TEXT NOT NULL, status TEXT NOT NULL,
+    last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+    PRIMARY KEY (rfid, controller_key)
+);
 """
 
 
@@ -550,6 +556,39 @@ class OutboxRepository(_Repository):
     def delete(self, item_id: str) -> None:
         self._write("DELETE FROM sync_outbox WHERE item_id=?", (item_id,))
 
+
+@dataclass(frozen=True, slots=True)
+class ETagControllerSync:
+    rfid: str
+    controller_key: str
+    status: str
+    last_error: str
+    updated_at: datetime
+
+
+class ETagControllerSyncRepository(_Repository):
+    table = "etag_controller_sync"
+
+    def set(self, rfid: str, controller_key: str, status: str, error: str = "") -> None:
+        self._write(
+            """INSERT INTO etag_controller_sync VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(rfid, controller_key) DO UPDATE SET
+               status=excluded.status, last_error=excluded.last_error, updated_at=excluded.updated_at""",
+            (rfid, controller_key, status, error[:500], datetime.now().isoformat()),
+        )
+
+    def for_tag(self, rfid: str) -> list[ETagControllerSync]:
+        rows = self.db.connection.execute(
+            "SELECT * FROM etag_controller_sync WHERE rfid=? ORDER BY controller_key", (rfid,)
+        ).fetchall()
+        return [ETagControllerSync(
+            row["rfid"], row["controller_key"], row["status"], row["last_error"],
+            datetime.fromisoformat(row["updated_at"]),
+        ) for row in rows]
+
+    def delete_tag(self, rfid: str) -> None:
+        self._write("DELETE FROM etag_controller_sync WHERE rfid=?", (rfid,))
+
 class Store:
     """One handle onto every repository."""
 
@@ -563,6 +602,7 @@ class Store:
         self.categories = CategoryRepository(self.database)
         self.settings = SettingsRepository(self.database)
         self.outbox = OutboxRepository(self.database)
+        self.etag_controller_sync = ETagControllerSyncRepository(self.database)
 
     def close(self) -> None:
         self.database.close()

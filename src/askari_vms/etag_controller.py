@@ -73,13 +73,16 @@ class HttpETagController:
         slot = current.slot if current else next(
             number for number in range(self.max_pages * 30) if number not in occupied
         )
+        issue = record.issue_date or date.today()
         expiry = record.expiry_date or date.today()
         enabled = record.status.casefold() == "active"
         self._request("/EditCard.shtm", {
             "Index": slot + 1, "isEnb": 1 if enabled else 0,
-            "Name": record.resident_name[:8], "Card": record.rfid[:10], "PIN": "",
-            "YearB": expiry.year, "MonthB": expiry.month, "DayB": expiry.day,
-            "HourB": 23, "MinuteB": 59,
+            "Name": record.vehicle_number.replace(" ", "")[:8], "Card": record.rfid[:10], "PIN": "",
+            "YearB": issue.year, "MonthB": issue.month, "DayB": issue.day,
+            "HourB": 0, "MinuteB": 0,
+            "YearE": expiry.year, "MonthE": expiry.month, "DayE": expiry.day,
+            "HourE": 23, "MinuteE": 59,
             "TZ1": 1 if enabled else 0, "TZ17": 0,
         })
         verified = self.find(record.rfid)

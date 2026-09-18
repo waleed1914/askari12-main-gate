@@ -309,10 +309,14 @@ class ETagsPage(QWidget):
         controllers: tuple[tuple[str, str], ...] | None = None,
         records: list[ETagRecord] | None = None,
         repository: object | None = None,
+        sync_service: object | None = None,
+        sync_repository: object | None = None,
     ) -> None:
         super().__init__()
         self._controllers = controllers if controllers is not None else CONTROLLERS
         self._repository = repository
+        self._sync = sync_service
+        self._sync_repository = sync_repository
         if records is None:
             if repository is not None:
                 records = repository.list()
@@ -490,6 +494,8 @@ class ETagsPage(QWidget):
             return
         self._records.append(candidate)
         self._store_save(candidate)
+        if self._sync is not None:
+            self._sync.save(candidate)
         self._show_list()
         self.refresh()
 
@@ -505,6 +511,8 @@ class ETagsPage(QWidget):
         if previous.rfid != record.rfid:
             self._store_delete(previous.rfid)
         self._store_save(record)
+        if self._sync is not None:
+            self._sync.replace(previous, record)
         self._show_list()
         self.refresh()
 
@@ -542,6 +550,8 @@ class ETagsPage(QWidget):
         for index in indexes:
             self._records[index] = replace(self._records[index], status=status)
             self._store_save(self._records[index])
+            if self._sync is not None:
+                self._sync.save(self._records[index])
         self.refresh()
         self.summary.setText(f"Updated {len(indexes)} E-Tag record(s) to {status}. Controller updates will be queued.")
 
@@ -553,6 +563,8 @@ class ETagsPage(QWidget):
         for index in indexes:
             self._records[index] = renew_for_one_year(self._records[index])
             self._store_save(self._records[index])
+            if self._sync is not None:
+                self._sync.save(self._records[index])
         self.refresh()
         self.summary.setText(f"Renewed {len(indexes)} E-Tag record(s) for one calendar year and set them Active.")
 
@@ -567,6 +579,8 @@ class ETagsPage(QWidget):
             self.summary.setText("Click Confirm delete to permanently remove the selected records and revoke controller access.")
             return
         for index in sorted(indexes, reverse=True):
+            if self._sync is not None:
+                self._sync.revoke(self._records[index].rfid)
             self._store_delete(self._records[index].rfid)
             del self._records[index]
         self._delete_armed = False
@@ -608,7 +622,7 @@ class ETagsPage(QWidget):
             values = (
                 record.user_id, record.rfid, record.vehicle_number, record.resident_name,
                 record.issue_date.strftime("%d %b %Y"), record.expiry_date.strftime("%d %b %Y"),
-                state.value, str(len(record.allowed_controllers)), "Allowed" if state is ETagState.ACTIVE else state.value,
+                state.value, self._sync_text(record), "Allowed" if state is ETagState.ACTIVE else state.value,
             )
             selector = QTableWidgetItem()
             selector.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
@@ -630,3 +644,11 @@ class ETagsPage(QWidget):
         self.delete_button.setText("Delete selected")
         expiring = sum(expiry_state(record) is ETagState.EXPIRING for record in self._records)
         self.summary.setText(f"{len(visible)} shown  •  {len(self._records)} total  •  {expiring} expiring within 10 days")
+
+    def _sync_text(self, record: ETagRecord) -> str:
+        if self._sync_repository is None:
+            return str(len(record.allowed_controllers))
+        states = {item.controller_key: item.status for item in self._sync_repository.for_tag(record.rfid)}
+        return " · ".join(
+            f"{key.title()}: {states.get(key, 'Pending')}" for key in record.allowed_controllers
+        ) or "None"

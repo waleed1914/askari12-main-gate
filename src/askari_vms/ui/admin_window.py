@@ -18,6 +18,7 @@ from askari_vms.auth import Session
 from askari_vms.cnic_ocr import LocalCNICReader
 from askari_vms.controller_events import entry_event_feed, exit_event_feed
 from askari_vms.gate_controller import entry_gate_controller, exit_gate_controller
+from askari_vms.etag_sync import ETagSyncService
 from askari_vms.ip_camera import entry_anpr_snapshot_feed, entry_driver_feed, exit_anpr_snapshot_feed, exit_driver_feed
 from askari_vms.printing import DirectUsbPrinter
 from askari_vms.speech import OfflineDictation, default_model_path
@@ -90,6 +91,10 @@ class AdminWindow(QMainWindow):
         self.audit_log = AuditLog(self.store.audit.list(), repository=self.store.audit)
         if session is not None:
             self.audit_log.set_operator(session.operator, session.workstation)
+        self.etag_sync = ETagSyncService(
+            self.settings, self.store.outbox, self.store.etag_controller_sync, self.audit_log,
+            on_changed=lambda: getattr(self, "etags_page", None) and self.etags_page.refresh(),
+        )
 
         self._nav_buttons: dict[str, QPushButton] = {}
         self._page_indexes: dict[str, int] = {}
@@ -114,7 +119,10 @@ class AdminWindow(QMainWindow):
         self._page_indexes["dashboard"] = 0
         for item in ADMIN_NAVIGATION[1:]:
             if item.key == "etags":
-                page = self.etags_page = ETagsPage(controller_choices(self.settings), repository=self.store.etags)
+                page = self.etags_page = ETagsPage(
+                    controller_choices(self.settings), repository=self.store.etags,
+                    sync_service=self.etag_sync, sync_repository=self.store.etag_controller_sync,
+                )
             elif item.key == "categories":
                 page = CategoriesPage(repository=self.store.categories)
             elif item.key == "users":
@@ -192,10 +200,15 @@ class AdminWindow(QMainWindow):
 
     def _settings_saved(self, settings) -> None:
         self.settings = settings
+        self.etag_sync.update_settings(settings)
         self.etags_page.set_controllers(controller_choices(settings))
         # The workstation role decides which lane this PC serves, so the portal buttons
         # have to follow it immediately — otherwise the change only appears on restart.
         self._apply_workstation_lane()
+
+    def closeEvent(self, event) -> None:
+        self.etag_sync.close()
+        super().closeEvent(event)
 
     def _apply_workstation_lane(self) -> None:
         lane = workstation_lane(self.settings.workstation_role)

@@ -37,6 +37,9 @@ def test_new_card_uses_free_slot_door_one_and_verifies(monkeypatch):
     assert data["TZ1"] == ["1"]
     assert data["TZ17"] == ["0"]
     assert data["Card"] == [record.rfid]
+    assert data["Name"] == [record.vehicle_number.replace(" ", "")[:8]]
+    assert data["YearB"] == [str(record.issue_date.year)]
+    assert data["YearE"] == [str(record.expiry_date.year)]
 
 
 def test_existing_card_reuses_its_slot(monkeypatch):
