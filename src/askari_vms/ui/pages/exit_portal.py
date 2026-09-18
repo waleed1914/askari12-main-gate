@@ -67,11 +67,12 @@ NO_ACTIVE_ENTRY = "No active entry found. Search by plate, CNIC or visit number,
 
 
 class EvidencePreview(QLabel):
-    """Use all available evidence-card space while preserving the whole photograph."""
+    """Use all available evidence-card space, optionally as a cropped live view."""
 
-    def __init__(self, empty_text: str) -> None:
+    def __init__(self, empty_text: str, *, cover: bool = False) -> None:
         super().__init__(empty_text)
         self._source = QPixmap()
+        self._cover = cover
         self.setProperty("muted", "true")
         self.setWordWrap(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -84,10 +85,16 @@ class EvidencePreview(QLabel):
 
     def _fit(self) -> None:
         if not self._source.isNull() and self.contentsRect().size().isValid():
-            super().setPixmap(self._source.scaled(
-                self.contentsRect().size(), Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+            size = self.contentsRect().size()
+            mode = Qt.AspectRatioMode.KeepAspectRatioByExpanding if self._cover else (
+                Qt.AspectRatioMode.KeepAspectRatio
+            )
+            fitted = self._source.scaled(size, mode, Qt.TransformationMode.SmoothTransformation)
+            if self._cover and fitted.size() != size:
+                left = max(0, (fitted.width() - size.width()) // 2)
+                top = max(0, (fitted.height() - size.height()) // 2)
+                fitted = fitted.copy(left, top, size.width(), size.height())
+            super().setPixmap(fitted)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -385,26 +392,29 @@ class ExitPortalWindow(QWidget):
         heading.setProperty("section", "true")
         layout.addWidget(heading)
 
-        self._panels: dict[str, QLabel] = {}
+        self._panels: dict[str, EvidencePreview] = {}
+        self._panel_status: dict[str, QLabel] = {}
         for key, title in STREAMS:
             panel = QFrame()
             panel.setObjectName("capturePanel")
             panel.setMinimumHeight(140)
-            box = QVBoxLayout(panel)
+            box = QGridLayout(panel)
             box.setContentsMargins(12, 10, 12, 10)
-            name = QLabel(title)
+            name = QLabel("ANPR" if key == "anpr" else "Driver")
             name.setObjectName("captureTitle")
-            name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            state = QLabel("No feed")
+            state = QLabel("Disconnected")
             state.setProperty("muted", "true")
-            state.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            state.setMinimumHeight(180)
-            box.addWidget(name)
-            box.addStretch()
-            box.addWidget(state)
-            box.addStretch()
-            self._panels[key] = state
-            layout.addWidget(panel)
+            for label in (name, state):
+                label.setStyleSheet(
+                    "background: rgba(245, 248, 246, 220); padding: 3px 9px; border-radius: 5px;"
+                )
+            preview = EvidencePreview("", cover=True)
+            box.addWidget(preview, 0, 0)
+            box.addWidget(name, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            box.addWidget(state, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+            self._panels[key] = preview
+            self._panel_status[key] = state
+            layout.addWidget(panel, 1)
 
         self.capture_button = QPushButton("Capture exit evidence")
         self.capture_button.setMinimumHeight(38)
@@ -631,10 +641,8 @@ class ExitPortalWindow(QWidget):
         self._captured["anpr"] = True
         self._captured["plate"] = True
         self._capture_driver()
-        self._panels["anpr"].setText("Captured (simulated)")
         if self._driver_camera is None:
             self._captured["driver"] = True
-            self._panels["driver"].setText("Captured (simulated)")
         self.status.setText(
             "Exit driver photo captured." if self._captured["driver"]
             else "No fresh driver photo. You may still submit."
@@ -648,15 +656,11 @@ class ExitPortalWindow(QWidget):
             pixmap = QPixmap()
             available = pixmap.loadFromData(frame.jpeg, "JPG")
             if available:
-                panel.setPixmap(pixmap.scaled(
-                    max(320, panel.width()), 240,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                ))
+                panel.setPixmap(pixmap)
                 self._driver_displayed_at = frame.received_at
         if not available:
             panel.clear()
-            panel.setText(frame.message if not frame.jpeg else "Driver camera stalled — reconnecting.")
+        self._panel_status["driver"].setText("Live" if available else "Disconnected")
         if available != self._driver_available:
             if available or self._driver_available is not None:
                 self._audit.record(
@@ -673,16 +677,16 @@ class ExitPortalWindow(QWidget):
         if frame.fresh():
             pixmap = QPixmap()
             if pixmap.loadFromData(frame.jpeg, "JPG"):
-                panel.setPixmap(pixmap.scaled(max(320, panel.width()), 240,
-                    Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                panel.setPixmap(pixmap)
+                self._panel_status["anpr"].setText("Live")
                 return
         panel.clear()
-        panel.setText(frame.message if not frame.jpeg else "ANPR camera stalled — reconnecting.")
+        self._panel_status["anpr"].setText("Disconnected")
 
     def _refresh_anpr(self) -> None:
-        readings, (_connected, message) = self._anpr_feed.drain()
+        readings, (connected, message) = self._anpr_feed.drain()
         if self._anpr_camera is None:
-            self._panels["anpr"].setText(message)
+            self._panel_status["anpr"].setText("Live" if connected else "Disconnected")
         for reading in readings:
             self.read_plate(reading.plate)
 
@@ -826,7 +830,9 @@ class ExitPortalWindow(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         for key, _title in STREAMS:
-            self._panels[key].setText("No feed")
+            self._panels[key].clear()
+            self._panels[key].setText("")
+            self._panel_status[key].setText("Disconnected")
         for button in (self.matched_button, self.mismatched_button):
             button.setProperty("pageActive", False)
             button.style().unpolish(button)
