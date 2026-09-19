@@ -14,6 +14,12 @@ from askari_vms.gate_controller import GateControllerError, read_credentials
 
 
 _SLOT_RE = re.compile(r"EditCard\.shtm\?ID=(\d+)", re.IGNORECASE)
+_INDEX_VALUE_RE = re.compile(r'name="Index"[^>]*value="(\d+)"', re.IGNORECASE)
+_CARD_VALUE_RE = re.compile(r'name="Card"[^>]*value="([^"]*)"', re.IGNORECASE)
+_ROW_RE = re.compile(
+    r"<tr><th>\d+</th><th>.*?</th><th>(.*?)</th>.*?EditCard\.shtm\?ID=(\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,16 +62,21 @@ class HttpETagController:
 
     def find(self, rfid: str) -> ControllerCard | None:
         html = self._request("/SearchCard.shtm", {"Card": rfid})
-        match = _SLOT_RE.search(html)
-        return ControllerCard(int(match.group(1)), rfid) if match else None
+        index = _INDEX_VALUE_RE.search(html)
+        card = _CARD_VALUE_RE.search(html)
+        if index and card and card.group(1).strip() == rfid:
+            return ControllerCard(int(index.group(1)) - 1, rfid)
+        return None
 
     def occupied_slots(self) -> set[int]:
         occupied: set[int] = set()
         for page in range(self.max_pages):
             html = self._request(f"/ShowCards.shtm?ID={page}")
-            found = {int(value) for value in _SLOT_RE.findall(html)}
-            occupied.update(found)
-            if not found or "Next" not in html:
+            rows = _ROW_RE.findall(html)
+            occupied.update(
+                int(slot) for card, slot in rows if re.sub(r"<[^>]+>", "", card).strip() not in ("", "0")
+            )
+            if not rows or "Next" not in html:
                 break
         return occupied
 
@@ -75,18 +86,18 @@ class HttpETagController:
         slot = current.slot if current else next(
             number for number in range(self.max_pages * 30) if number not in occupied
         )
-        issue = record.issue_date or date.today()
         expiry = record.expiry_date or date.today()
         enabled = record.status.casefold() == "active"
-        self._request("/EditCard.shtm", {
-            "Index": slot + 1, "isEnb": 1 if enabled else 0,
+        fields = {
+            "Index": slot + 1,
             "Name": record.vehicle_number.replace(" ", "")[:8], "Card": record.rfid[:10], "PIN": "",
-            "YearB": issue.year, "MonthB": issue.month, "DayB": issue.day,
-            "HourB": 0, "MinuteB": 0,
-            "YearE": expiry.year, "MonthE": expiry.month, "DayE": expiry.day,
-            "HourE": 23, "MinuteE": 59,
-            "TZ1": 1 if enabled else 0, "TZ17": 0,
-        })
+            "Year": 2000, "Month": 0, "Day": 0, "Hour": 0, "Minute": 0,
+            "YearB": expiry.year, "MonthB": expiry.month, "DayB": expiry.day,
+            "HourB": 23, "MinuteB": 59,
+        }
+        if enabled:
+            fields.update({"isEnb": 1, "TZ1": 1})
+        self._request("/EditCard.shtm", fields)
         verified = self.find(record.rfid)
         if verified is None:
             raise GateControllerError("Controller did not verify the E-Tag after writing it.")
@@ -97,7 +108,7 @@ class HttpETagController:
         if current is None:
             return
         self._request("/EditCard.shtm", {
-            "Index": current.slot + 1, "isEnb": 0, "Name": "", "Card": rfid[:10],
-            "PIN": "", "YearB": 2099, "MonthB": 12, "DayB": 31,
-            "HourB": 23, "MinuteB": 59, "TZ1": 0, "TZ17": 0,
+            "Index": current.slot + 1, "Name": "", "Card": rfid[:10], "PIN": "",
+            "Year": 2000, "Month": 0, "Day": 0, "Hour": 0, "Minute": 0,
+            "YearB": 2099, "MonthB": 12, "DayB": 31, "HourB": 23, "MinuteB": 59,
         })

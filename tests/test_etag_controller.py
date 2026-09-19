@@ -14,7 +14,11 @@ class _Response:
 
 def test_new_card_uses_free_slot_door_one_and_verifies(monkeypatch):
     requests = []
-    searches = iter(["no result", '<a href="EditCard.shtm?ID=1">found</a>'])
+    record = etag_records(1)[0]
+    searches = iter([
+        "no result",
+        f'<input name="Index" value="2"><input name="Card" value="{record.rfid}">',
+    ])
 
     class Opener:
         def open(self, request, timeout):
@@ -22,12 +26,16 @@ def test_new_card_uses_free_slot_door_one_and_verifies(monkeypatch):
             if request.full_url.endswith("/SearchCard.shtm"):
                 return _Response(next(searches))
             if "ShowCards" in request.full_url:
-                return _Response('<a href="EditCard.shtm?ID=0">card</a>')
+                return _Response(
+                    '<tr><th>1</th><th>CAR1</th><th>123</th><th>*</th>'
+                    '<th>x</th><th>x</th><th><a href=EditCard.shtm?ID=0>Edit</a></th></tr>'
+                    '<tr><th>2</th><th></th><th></th><th></th><th></th><th></th>'
+                    '<th><a href=EditCard.shtm?ID=1>Edit</a></th></tr>'
+                )
             return _Response("saved")
 
     monkeypatch.setattr("askari_vms.etag_controller.read_credentials", lambda *_: ("admin", "secret"))
     monkeypatch.setattr("askari_vms.etag_controller.urllib.request.build_opener", lambda *_: Opener())
-    record = etag_records(1)[0]
     record = record.__class__(**{**record.__dict__}) if hasattr(record, "__dict__") else record
     result = HttpETagController("entry", "192.168.1.10", max_pages=1).save(record)
     assert result.slot == 1
@@ -35,11 +43,11 @@ def test_new_card_uses_free_slot_door_one_and_verifies(monkeypatch):
     data = parse_qs(write.data.decode())
     assert data["Index"] == ["2"]
     assert data["TZ1"] == ["1"]
-    assert data["TZ17"] == ["0"]
+    assert "TZ17" not in data
     assert data["Card"] == [record.rfid]
     assert data["Name"] == [record.vehicle_number.replace(" ", "")[:8]]
-    assert data["YearB"] == [str(record.issue_date.year)]
-    assert data["YearE"] == [str(record.expiry_date.year)]
+    assert data["Year"] == ["2000"]
+    assert data["YearB"] == [str(record.expiry_date.year)]
 
 
 def test_existing_card_reuses_its_slot(monkeypatch):
@@ -47,7 +55,10 @@ def test_existing_card_reuses_its_slot(monkeypatch):
     class Opener:
         def open(self, request, timeout):
             requests.append(request)
-            return _Response('<a href="EditCard.shtm?ID=8">found</a>' if request.full_url.endswith("/SearchCard.shtm") else "saved")
+            return _Response(
+                f'<input name="Index" value="9"><input name="Card" value="{record.rfid}">'
+                if request.full_url.endswith("/SearchCard.shtm") else "saved"
+            )
     monkeypatch.setattr("askari_vms.etag_controller.read_credentials", lambda *_: ("admin", "secret"))
     monkeypatch.setattr("askari_vms.etag_controller.urllib.request.build_opener", lambda *_: Opener())
     record = etag_records(1)[0]
