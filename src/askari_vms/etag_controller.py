@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass
 from datetime import date
 import re
@@ -36,14 +35,17 @@ class HttpETagController:
             username, password = read_credentials(self.key, self.address)
         except Exception:
             raise GateControllerError("Controller credentials unavailable in Windows Credential Manager.") from None
-        token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
         body = urllib.parse.urlencode(data).encode("ascii") if data is not None else None
         request = urllib.request.Request(
             f"http://{self.address}:{self.port}{path}", data=body,
-            headers={"Authorization": f"Basic {token}",
-                     "Content-Type": "application/x-www-form-urlencoded"},
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "User-Agent": "Mozilla/5.0", "Connection": "close"},
         )
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        manager.add_password(None, f"http://{self.address}:{self.port}/", username, password)
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), urllib.request.HTTPBasicAuthHandler(manager)
+        )
         try:
             with opener.open(request, timeout=self.timeout) as response:
                 return response.read(512_000).decode("utf-8", "replace")
