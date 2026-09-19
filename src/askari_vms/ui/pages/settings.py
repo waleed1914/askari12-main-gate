@@ -25,6 +25,7 @@ from askari_vms.settings import (
     unassigned_lanes,
     validate_settings,
 )
+from askari_vms.gate_controller import write_credentials
 
 
 class SettingsPage(QScrollArea):
@@ -323,6 +324,18 @@ class SettingsPage(QScrollArea):
         errors = validate_settings(candidate)
         if errors:
             self._show_message("  •  ".join(errors.values()), error=True)
+            return False
+        try:
+            for controller in candidate.controllers:
+                password = self._controller_fields[controller.key]["password"].text()
+                if password:
+                    write_credentials(
+                        controller.key, controller.ip_address, controller.username, password
+                    )
+        except Exception:
+            self._show_message(
+                "Controller password could not be saved to Windows Credential Manager.", error=True
+            )
             return False
         self.settings = candidate
         if self._repository is not None:

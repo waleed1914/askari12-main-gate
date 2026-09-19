@@ -42,6 +42,19 @@ def read_credentials(key: str, address: str) -> tuple[str, str]:
     return record["UserName"], password
 
 
+def write_credentials(key: str, address: str, username: str, password: str) -> None:
+    """Persist a controller secret under the same target used by every adapter."""
+    import win32cred
+
+    win32cred.CredWrite({
+        "Type": win32cred.CRED_TYPE_GENERIC,
+        "TargetName": credential_target(key, address),
+        "UserName": username,
+        "CredentialBlob": password,
+        "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
+    }, 0)
+
+
 @dataclass(frozen=True, slots=True)
 class HttpGateController:
     key: str
