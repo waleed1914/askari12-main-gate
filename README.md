@@ -32,7 +32,7 @@ python -m askari_vms
 
 ## Signing in
 
-Demo accounts all share the password `change-me-123`. **Change this before the system
+Demo accounts all share the password `Elv12345`. **Change this before the system
 goes live.**
 
 | Username     | Role     | Lands on           |

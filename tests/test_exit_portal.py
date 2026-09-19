@@ -283,7 +283,7 @@ def test_the_exit_pc_routes_operators_to_the_exit_portal(qapp, tmp_path) -> None
     try:
         store.seed_if_empty()
         store.settings.save(replace(default_settings(), workstation_role="Exit"))
-        operator, _ = authenticate(store.users.list(), "operator01", "change-me-123")
+        operator, _ = authenticate(store.users.list(), "operator01", "Elv12345")
         assert portal_for(operator.role, "Exit") is Portal.EXIT
     finally:
         store.close()

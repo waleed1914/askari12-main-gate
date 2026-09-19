@@ -8,7 +8,7 @@ from askari_vms.etag_events import ETagEvent, ETagEventKind
 from askari_vms.etags import ETagRecord
 from askari_vms.settings import default_settings, with_controller
 from askari_vms.storage import SCHEMA_VERSION, Store, default_database_path
-from askari_vms.users import UserAccount, UserRole, verify_password
+from askari_vms.users import INITIAL_PASSWORD, UserAccount, UserRole, hash_password, verify_password
 from askari_vms.visits import DriverMatch, VisitRecord, check_out
 
 TODAY = date(2026, 9, 3)
@@ -200,6 +200,31 @@ def test_data_survives_reopening_the_file(tmp_path) -> None:
     assert [e.event_id for e in second.audit.list()] == ["AUD-000001"]
     assert second.database.version == SCHEMA_VERSION
     second.close()
+
+
+def test_version_13_resets_every_existing_account_to_the_temporary_password(tmp_path) -> None:
+    path = tmp_path / "password-migration.sqlite3"
+    first = Store(path)
+    first.users.save(UserAccount(
+        "ADMIN-01", "Administrator", "admin", UserRole.ADMIN,
+        password_hash=hash_password("old-admin-password"),
+    ))
+    first.users.save(UserAccount(
+        "OP-001", "Operator One", "operator01", UserRole.OPERATOR,
+        password_hash=hash_password("old-operator-password"),
+    ))
+    first.database.connection.execute("UPDATE schema_version SET version = 12")
+    first.database.connection.commit()
+    first.close()
+
+    migrated = Store(path)
+    try:
+        accounts = migrated.users.list()
+        assert all(verify_password(INITIAL_PASSWORD, account.password_hash) for account in accounts)
+        assert not any(verify_password("old-admin-password", account.password_hash) for account in accounts)
+        assert migrated.database.version == SCHEMA_VERSION
+    finally:
+        migrated.close()
 
 
 def test_database_path_follows_the_configured_data_folder() -> None:

@@ -29,7 +29,7 @@ from askari_vms.settings import (
 from askari_vms.users import UserAccount
 from askari_vms.visits import VisitRecord
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 MEMORY = ":memory:"
 
 _SCHEMA = """
@@ -161,7 +161,16 @@ class Database:
                     self._seed_category_migration()
                 if old_version < 8:
                     self._migrate_confirmed_camera_map()
+                if old_version < 13:
+                    self._reset_initial_account_passwords()
                 self.connection.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+
+    def _reset_initial_account_passwords(self) -> None:
+        """One-time deployment migration requested for every existing local account."""
+        from askari_vms.users import INITIAL_PASSWORD, hash_password
+
+        password_hash = hash_password(INITIAL_PASSWORD)
+        self.connection.execute("UPDATE users SET password_hash=?", (password_hash,))
 
     def _migrate_confirmed_camera_map(self) -> None:
         """Apply the physically confirmed ANPR assignments to existing installations."""

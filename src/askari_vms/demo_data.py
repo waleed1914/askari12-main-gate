@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 
 from askari_vms.etag_events import IN, OUT, build_event
 from askari_vms.etags import ETagRecord
-from askari_vms.users import UserAccount, UserRole, hash_password
+from askari_vms.users import INITIAL_PASSWORD, UserAccount, UserRole, hash_password
 from askari_vms.visits import DriverMatch, VisitRecord, check_out
 
 FIRST_NAMES = (
@@ -181,7 +181,7 @@ def user_accounts(seed: int = 20260903) -> list[UserAccount]:
             contact=_mobile(rng), cnic=_cnic(rng), email=f"{username}@askari12.local",
             department=rng.choice(DEPARTMENTS), designation=designation,
             address=f"House {rng.randrange(1, 200)}, Askari Greens, Lahore",
-            password_hash=hash_password("change-me-123"),
+            password_hash=hash_password(INITIAL_PASSWORD),
         ))
     return accounts
 

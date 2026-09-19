@@ -1328,7 +1328,7 @@ def test_sign_in_routes_on_the_current_lane_not_the_startup_one(qapp, tmp_path) 
         def current():
             return store.settings.load() or default_settings()
 
-        operator, _ = authenticate(store.users.list(), "operator01", "change-me-123")
+        operator, _ = authenticate(store.users.list(), "operator01", "Elv12345")
         assert portal_for(operator.role, current().workstation_role) is Portal.ENTRY
 
         store.settings.save(replace(default_settings(), workstation_role="Exit"))

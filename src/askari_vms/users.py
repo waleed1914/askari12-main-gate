@@ -17,6 +17,7 @@ MINIMUM_PASSWORD_LENGTH = 6
 
 _ALGORITHM = "pbkdf2_sha256"
 _ITERATIONS = 240_000
+INITIAL_PASSWORD = "Elv12345"
 
 
 def hash_password(password: str, salt: bytes | None = None) -> str:

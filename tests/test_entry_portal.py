@@ -382,7 +382,7 @@ def test_an_operator_signing_in_reaches_the_entry_portal(qapp, tmp_path) -> None
         store.seed_if_empty()
         accounts = store.users.list()
 
-        operator, problem = authenticate(accounts, "operator01", "change-me-123")
+        operator, problem = authenticate(accounts, "operator01", "Elv12345")
         assert problem == "" and operator is not None
         assert portal_for(operator.role, "Admin + Entry") is Portal.ENTRY
 
@@ -399,7 +399,7 @@ def test_an_operator_signing_in_reaches_the_entry_portal(qapp, tmp_path) -> None
         assert portal.events_table.rowCount() > 0, "the live feed should be populated"
         assert len(portal._categories) >= 3
 
-        admin, _ = authenticate(accounts, "admin", "change-me-123")
+        admin, _ = authenticate(accounts, "admin", "Elv12345")
         assert portal_for(admin.role, "Admin + Entry") is Portal.ADMIN
     finally:
         store.close()

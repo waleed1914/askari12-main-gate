@@ -10,7 +10,7 @@ from askari_vms.auth import (
     authenticate,
     start_session,
 )
-from askari_vms.users import UserAccount, UserRole, hash_password
+from askari_vms.users import INITIAL_PASSWORD, UserAccount, UserRole, hash_password
 
 
 def account(username="operator01", password="secret123", status="Active", role=UserRole.OPERATOR) -> UserAccount:
@@ -95,10 +95,10 @@ def test_initial_accounts_allow_login_without_creating_gate_traffic(qapp):
         assert store.seed_accounts_if_empty()
         login = LoginWindow(store, workstation="Admin + Entry")
         login.username.setText("operator01")
-        login.password.setText("change-me-123")
+        login.password.setText(INITIAL_PASSWORD)
         session = login.sign_in()
         assert session is not None and session.role == UserRole.OPERATOR
-        assert authenticate(store.users.list(), "admin", "change-me-123")[0] is not None
+        assert authenticate(store.users.list(), "admin", INITIAL_PASSWORD)[0] is not None
         assert [(item.name, item.shortcut) for item in store.categories.active()][:3] == [
             ("Car", "F1"), ("Truck", "F2"), ("Motorcycle", "F3"),
         ]

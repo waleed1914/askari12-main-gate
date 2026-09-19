@@ -38,7 +38,7 @@ themselves audited with the session times. An unknown username and a wrong passw
 the identical message, so the form cannot be used to enumerate accounts; the password is
 verified *before* the status is checked for the same reason.
 
-⚠ **Seeded accounts all share the password `change-me-123`.** That is fine for a demo
+⚠ **Seeded accounts all share the password `Elv12345`.** That is fine for a demo
 database and unacceptable on the gate PC. Before this goes near the society, either
 change every password through Users or add a forced change-on-first-login.
 
