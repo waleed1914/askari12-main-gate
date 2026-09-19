@@ -30,7 +30,7 @@ askari-vms-server = "askari_vms.lan_server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-askari_vms = ["ui/assets/*.svg", "ui/assets/*.png", "ui/assets/*.jpeg", "ui/assets/*.jpg"]
+askari_vms = ["ui/assets/*.svg", "ui/assets/*.png", "ui/assets/*.jpeg", "ui/assets/*.jpg", "ui/assets/*.ico"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
